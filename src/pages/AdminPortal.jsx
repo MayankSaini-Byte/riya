@@ -442,9 +442,9 @@ export default function AdminPortal() {
             </section>
             <form className="admin-editor admin-account-form" onSubmit={addAdminUser}>
               <h2>Add team access</h2>
-              <p className="admin-muted">Only a Super Admin can add accounts. Each person gets their own role and password.</p>
+              <p className="admin-muted">Only a Super Admin can add accounts. Assign Super Admin to give someone the same full portal access as you. Each person gets their own password.</p>
               <label>Email or username<input autoComplete="off" value={newAccount.username} onChange={event => setNewAccount({ ...newAccount, username: event.target.value })} required /></label>
-              <label>Role<select value={newAccount.role} onChange={event => setNewAccount({ ...newAccount, role: event.target.value })}><option value="content_editor">Content Editor</option><option value="event_organizer">Event Organizer</option><option value="evaluator">Evaluator</option><option value="read_only">Read Only</option></select></label>
+              <label>Role<select value={newAccount.role} onChange={event => setNewAccount({ ...newAccount, role: event.target.value })}><option value="content_editor">Content Editor</option><option value="event_organizer">Event Organizer</option><option value="evaluator">Evaluator</option><option value="read_only">Read Only</option><option value="super_admin">Super Admin — full access</option></select></label>
               <label>Initial password<input type="password" autoComplete="new-password" minLength={14} value={newAccount.password} onChange={event => setNewAccount({ ...newAccount, password: event.target.value })} required /></label>
               <div className="admin-editor-actions"><span>Use at least 14 characters. Share it securely.</span><button className="admin-primary" disabled={busy}>{busy ? 'Adding…' : 'Add account'}</button></div>
             </form>
