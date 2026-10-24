@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { safeExternalUrl } from '../lib/buildInPublic'
 import './AdminPortal.css'
 
 const COLLECTIONS = [
@@ -8,7 +9,7 @@ const COLLECTIONS = [
   { type: 'siteAnnouncement', label: 'Announcements' },
 ]
 
-const EMPTY_PROJECT = { title: '', summary: '', guidelines: '', tags: '', status: 'draft' }
+const EMPTY_PROJECT = { title: '', summary: '', guidelines: '', tags: '', category: '', difficulty: '', authorName: '', authorRole: '', status: 'draft' }
 
 function canEditCollection(role, type) {
   if (role === 'super_admin') return true
@@ -167,9 +168,14 @@ export default function AdminPortal() {
     setProjectDraft(project ? {
       ...project,
       tags: (project.tags || []).join(', '),
+      category: project.category || '',
+      difficulty: project.difficulty || '',
+      authorName: project.authorName || '',
+      authorRole: project.authorRole || '',
       repositoryUrl: project.repositoryUrl || '',
       imageDriveUrl: project.imageDriveUrl || '',
-    } : { ...EMPTY_PROJECT, repositoryUrl: '', imageDriveUrl: '' })
+      authorAvatarUrl: project.authorAvatarUrl || '',
+    } : { ...EMPTY_PROJECT, repositoryUrl: '', imageDriveUrl: '', authorAvatarUrl: '' })
     setError('')
     setNotice('')
   }
@@ -436,9 +442,9 @@ export default function AdminPortal() {
             </section>
             <form className="admin-editor admin-account-form" onSubmit={addAdminUser}>
               <h2>Add team access</h2>
-              <p className="admin-muted">Only a Super Admin can add accounts. Assign Super Admin to give someone the same full portal access as you. Each person gets their own password.</p>
+              <p className="admin-muted">Only a Super Admin can add accounts. Each person gets their own role and password.</p>
               <label>Email or username<input autoComplete="off" value={newAccount.username} onChange={event => setNewAccount({ ...newAccount, username: event.target.value })} required /></label>
-              <label>Role<select value={newAccount.role} onChange={event => setNewAccount({ ...newAccount, role: event.target.value })}><option value="content_editor">Content Editor</option><option value="event_organizer">Event Organizer</option><option value="evaluator">Evaluator</option><option value="read_only">Read Only</option><option value="super_admin">Super Admin — full access</option></select></label>
+              <label>Role<select value={newAccount.role} onChange={event => setNewAccount({ ...newAccount, role: event.target.value })}><option value="content_editor">Content Editor</option><option value="event_organizer">Event Organizer</option><option value="evaluator">Evaluator</option><option value="read_only">Read Only</option></select></label>
               <label>Initial password<input type="password" autoComplete="new-password" minLength={14} value={newAccount.password} onChange={event => setNewAccount({ ...newAccount, password: event.target.value })} required /></label>
               <div className="admin-editor-actions"><span>Use at least 14 characters. Share it securely.</span><button className="admin-primary" disabled={busy}>{busy ? 'Adding…' : 'Add account'}</button></div>
             </form>
@@ -464,6 +470,11 @@ export default function AdminPortal() {
                 <label>Project name<input value={projectDraft.title} maxLength={140} onChange={event => setProjectDraft({ ...projectDraft, title: event.target.value })} required /></label>
                 <label>Project summary<textarea value={projectDraft.summary} maxLength={1200} rows={4} onChange={event => setProjectDraft({ ...projectDraft, summary: event.target.value })} required /></label>
                 <label>Contribution guidelines<textarea value={projectDraft.guidelines} maxLength={1200} rows={4} onChange={event => setProjectDraft({ ...projectDraft, guidelines: event.target.value })} required /></label>
+                <label>Track / category <span className="admin-muted">Groups the project on the public ledger.</span><input value={projectDraft.category} maxLength={40} onChange={event => setProjectDraft({ ...projectDraft, category: event.target.value })} placeholder="AI &amp; Agents, Systems &amp; Tools, Web &amp; Product…" /></label>
+                <label>Difficulty<select value={projectDraft.difficulty} onChange={event => setProjectDraft({ ...projectDraft, difficulty: event.target.value })}><option value="">Not set</option><option value="Beginner">Beginner</option><option value="Intermediate">Intermediate</option><option value="Advanced">Advanced</option></select></label>
+                <label>Owner name <span className="admin-muted">Shown as the project byline.</span><input value={projectDraft.authorName} maxLength={80} onChange={event => setProjectDraft({ ...projectDraft, authorName: event.target.value })} placeholder="Binary Minds Core, Riya S.…" /></label>
+                <label>Owner role<input value={projectDraft.authorRole} maxLength={80} onChange={event => setProjectDraft({ ...projectDraft, authorRole: event.target.value })} placeholder="Maintainers, Project lead…" /></label>
+                <label>Owner avatar Google Drive link <span className="admin-muted">Optional. Set the Drive image to “Anyone with the link can view.”</span><input type="url" value={projectDraft.authorAvatarUrl || ''} onChange={event => setProjectDraft({ ...projectDraft, authorAvatarUrl: event.target.value })} placeholder="https://drive.google.com/file/d/…" /></label>
                 <label>Tags <span className="admin-muted">Separate tags with commas.</span><input value={projectDraft.tags} onChange={event => setProjectDraft({ ...projectDraft, tags: event.target.value })} placeholder="Python, React, AI / ML" /></label>
                 <label>Git repository link <span className="admin-muted">Optional HTTPS link to the project repository.</span><input type="url" value={projectDraft.repositoryUrl || ''} onChange={event => setProjectDraft({ ...projectDraft, repositoryUrl: event.target.value })} placeholder="https://github.com/organization/project" /></label>
                 <label>Project image Google Drive link <span className="admin-muted">Optional. Set the Drive image to “Anyone with the link can view.”</span><input type="url" value={projectDraft.imageDriveUrl || ''} onChange={event => setProjectDraft({ ...projectDraft, imageDriveUrl: event.target.value })} placeholder="https://drive.google.com/file/d/…" /></label>
@@ -478,7 +489,14 @@ export default function AdminPortal() {
                     {submission.status === 'accepted' && <p className={`admin-email-status ${submission.emailNotificationStatus === 'sent' ? 'is-sent' : 'is-failed'}`}>{submission.emailNotificationStatus === 'sent' ? 'Acceptance email sent' : submission.emailNotificationStatus === 'failed' ? `Acceptance email failed: ${submission.emailNotificationError || 'Retry after checking email setup.'}` : 'Acceptance email has not been sent yet.'}</p>}
                     <h2>{submission.fullName}</h2>
                     <p><strong>Project:</strong> {submission.project || 'Binary Minds Open AI Agent Framework'}<br /><strong>Student email:</strong> <a href={`mailto:${submission.studentEmail}`}>{submission.studentEmail}</a></p>
-                    <div className="admin-submission-meta"><a href={submission.githubProfile} target="_blank" rel="noreferrer">GitHub profile ↗</a><a href={submission.linkedinProfile} target="_blank" rel="noreferrer">LinkedIn profile ↗</a></div>
+                    <div className="admin-submission-meta">
+                      {safeExternalUrl(submission.githubProfile)
+                        ? <a href={safeExternalUrl(submission.githubProfile)} target="_blank" rel="noopener noreferrer">GitHub profile ↗</a>
+                        : <span>GitHub profile unavailable</span>}
+                      {safeExternalUrl(submission.linkedinProfile)
+                        ? <a href={safeExternalUrl(submission.linkedinProfile)} target="_blank" rel="noopener noreferrer">LinkedIn profile ↗</a>
+                        : <span>LinkedIn profile unavailable</span>}
+                    </div>
                     <h3>Why they want to contribute</h3><p>{submission.motivation}</p>
                     <h3>Contribution idea</h3><p>{submission.contributionIdea}</p>
                     {submission.attachment && <button className="admin-secondary admin-attachment-button" disabled={busy} onClick={() => downloadAttachment(submission)}>Download {submission.attachment.fileName} ({(submission.attachment.size / 1024 / 1024).toFixed(1)} MB)</button>}

@@ -13,6 +13,7 @@ import Minds from './pages/Minds'
 import MindDetail from './pages/MindDetail'
 import Events from './pages/Events'
 import BuildInPublic from './pages/BuildInPublic'
+import BuildInPublicProject from './pages/BuildInPublicProject'
 import NotFound from './pages/NotFound'
 import AdminPortal from './pages/AdminPortal'
 
@@ -38,6 +39,7 @@ function App() {
           <Route path="/minds/:slug" element={<MindDetail />} />
           <Route path="/events" element={<Events />} />
           <Route path="/build-in-public" element={<BuildInPublic />} />
+          <Route path="/build-in-public/:projectId" element={<BuildInPublicProject />} />
           <Route path="/blitz" element={<Navigate to="/build-in-public" replace />} />
           <Route path="/blitz/:slug" element={<Navigate to="/build-in-public" replace />} />
           <Route path="/kazi_binary_admins/*" element={<AdminPortal />} />

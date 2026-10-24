@@ -136,6 +136,30 @@ export function clearSessionCookie(res) {
   res.setHeader('Set-Cookie', `${COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`)
 }
 
+/**
+ * The address to key rate limits on.
+ *
+ * `x-real-ip` is set by the platform edge and holds a single, trustworthy
+ * value, so it is preferred. Falling back to `x-forwarded-for`, we take the
+ * LAST entry rather than the first: the header reads `client, proxy1, proxy2`,
+ * and a caller may send their own `x-forwarded-for`, which the edge appends
+ * to. Only the final entry is the address the trusted edge actually observed.
+ * Taking the first would let anyone rotate invented addresses and walk past
+ * every limit below.
+ *
+ * Returns an empty string when no address is available; callers decide what a
+ * missing address means rather than silently sharing one bucket by accident.
+ */
+export function clientAddress(req) {
+  const real = String(req.headers['x-real-ip'] || '').trim()
+  if (real) return real
+  const chain = String(req.headers['x-forwarded-for'] || '')
+    .split(',')
+    .map(part => part.trim())
+    .filter(Boolean)
+  return chain.length ? chain[chain.length - 1] : ''
+}
+
 export async function enforceLoginLimit(req, res, username) {
   const url = process.env.UPSTASH_REDIS_REST_URL
   const token = process.env.UPSTASH_REDIS_REST_TOKEN
@@ -143,7 +167,9 @@ export async function enforceLoginLimit(req, res, username) {
     json(res, 503, { error: 'Login protection is not configured' })
     return false
   }
-  const address = String(req.headers['x-forwarded-for'] || 'unknown').split(',').at(-1).trim()
+  // With no address the limit still applies per account, which is the control
+  // that matters for password guessing.
+  const address = clientAddress(req) || 'no-address'
   const key = `bm-admin-login:${createHmac('sha256', process.env.SESSION_SECRET).update(`${address}:${username.toLowerCase()}`).digest('hex')}`
   const script = "local n=redis.call('INCR',KEYS[1]); if n==1 then redis.call('EXPIRE',KEYS[1],900) end; return n"
   try {
@@ -260,7 +286,10 @@ export async function deleteBuildInPublicAttachment(attachment) {
 }
 
 export async function checkPublicSubmissionLimit(req) {
-  const address = String(req.headers['x-forwarded-for'] || 'unknown').split(',').at(-1).trim()
+  // The platform always sets one of these headers, so an empty address means
+  // the app is not behind the expected edge. Keep limiting rather than opening
+  // the endpoint up, but on a shared bucket so the cause is visible in Redis.
+  const address = clientAddress(req) || 'no-address'
   const digest = createHmac('sha256', process.env.SESSION_SECRET || 'binary-minds').update(address).digest('hex')
   const key = `bm-bip:rate:${digest}`
   const result = await redisCommand(['EVAL', "local n=redis.call('INCR',KEYS[1]); if n==1 then redis.call('EXPIRE',KEYS[1],3600) end; return n", '1', key])

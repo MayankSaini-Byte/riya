@@ -2,6 +2,7 @@ import { createProjectId, getBuildInPublicProjects, PROJECTS_KEY } from '../../s
 import { json, recordAudit, requireSameOrigin, requireSession, setSecurityHeaders, writeStoredJson } from '../../server/security.js'
 
 const STATUSES = new Set(['draft', 'published', 'archived'])
+const DIFFICULTIES = new Set(['Beginner', 'Intermediate', 'Advanced'])
 
 function bodyOf(req) {
   const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body
@@ -44,9 +45,15 @@ function projectFields(body) {
     throw new Error('Add a title, a summary of at least 20 characters, and contribution guidelines of at least 10 characters.')
   }
   if (!STATUSES.has(status)) throw new Error('Choose draft, published, or archived for the project status.')
+  const category = cleanText(body.category, 40)
+  const difficulty = cleanText(body.difficulty, 20)
+  if (difficulty && !DIFFICULTIES.has(difficulty)) throw new Error('Choose Beginner, Intermediate, or Advanced for difficulty.')
+  const authorName = cleanText(body.authorName, 80)
+  const authorRole = cleanText(body.authorRole, 80)
   const repositoryUrl = safeHttpsUrl(body.repositoryUrl, 'repository')
   const imageDriveUrl = driveImageUrl(body.imageDriveUrl)
-  return { title, summary, guidelines, tags, repositoryUrl, imageDriveUrl, status }
+  const authorAvatarUrl = driveImageUrl(body.authorAvatarUrl)
+  return { title, summary, guidelines, tags, category, difficulty, authorName, authorRole, repositoryUrl, imageDriveUrl, authorAvatarUrl, status }
 }
 
 export default async function handler(req, res) {

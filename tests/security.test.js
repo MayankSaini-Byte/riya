@@ -1,6 +1,6 @@
 import test, { before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { createPasswordHash, createSession, readSession, verifyPassword } from '../server/security.js'
+import { clientAddress, createPasswordHash, createSession, readSession, verifyPassword } from '../server/security.js'
 
 const originalEnvironment = {
   SESSION_SECRET: process.env.SESSION_SECRET,
@@ -54,4 +54,30 @@ test('credential or role changes revoke existing sessions', async () => {
 
 test('password hashing rejects weak passwords', async () => {
   await assert.rejects(() => createPasswordHash('short'), /between 14 and 1024 characters/)
+})
+
+test('the rate-limit address cannot be spoofed with a forged forwarding header', () => {
+  // A caller sends their own x-forwarded-for; the edge appends what it saw.
+  // Only the final entry is trustworthy.
+  assert.equal(
+    clientAddress({ headers: { 'x-forwarded-for': '9.9.9.9, 203.0.113.7' } }),
+    '203.0.113.7'
+  )
+})
+
+test('x-real-ip wins over the forwarding chain', () => {
+  assert.equal(
+    clientAddress({ headers: { 'x-real-ip': '203.0.113.7', 'x-forwarded-for': '9.9.9.9' } }),
+    '203.0.113.7'
+  )
+})
+
+test('blank and malformed forwarding headers yield no address', () => {
+  assert.equal(clientAddress({ headers: {} }), '')
+  assert.equal(clientAddress({ headers: { 'x-forwarded-for': '  ,  ' } }), '')
+  assert.equal(clientAddress({ headers: { 'x-real-ip': '   ' } }), '')
+})
+
+test('a single-entry forwarding chain is read correctly', () => {
+  assert.equal(clientAddress({ headers: { 'x-forwarded-for': '203.0.113.7' } }), '203.0.113.7')
 })
