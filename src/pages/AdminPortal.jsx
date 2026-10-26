@@ -476,6 +476,16 @@ export default function AdminPortal() {
     finally { setBusy(false) }
   }
 
+  async function deleteSubmission(submission) {
+    setBusy(true)
+    try {
+      await request('/api/admin/build-in-public', { method: 'DELETE', body: JSON.stringify({ id: submission.id }) })
+      await refreshSubmissions()
+      say(`Request${submission.attachment ? ' and attachment' : ''} deleted.`)
+    } catch (reason) { say(reason.message, 'stop') }
+    finally { setBusy(false) }
+  }
+
   async function addAdminUser(event) {
     event.preventDefault()
     setBusy(true)
@@ -926,6 +936,7 @@ export default function AdminPortal() {
                             {submission.status !== 'accepted' && <button type="button" className="ks-btn ks-btn-primary ks-btn-sm" disabled={busy} onClick={() => reviewSubmission(submission.id, 'accepted')}>Accept &amp; email</button>}
                             {submission.status === 'accepted' && submission.emailNotificationStatus !== 'sent' && <button type="button" className="ks-btn ks-btn-ghost ks-btn-sm" disabled={busy} onClick={() => reviewSubmission(submission.id, 'accepted')}>Retry email</button>}
                             {submission.status !== 'rejected' && <Confirm onConfirm={() => reviewSubmission(submission.id, 'rejected')} disabled={busy} confirmLabel="Reject">Reject</Confirm>}
+                            <Confirm onConfirm={() => deleteSubmission(submission)} disabled={busy} confirmLabel={submission.attachment ? 'Delete + attachment' : 'Delete permanently'}>Delete</Confirm>
                           </div>
                         </article>
                       )

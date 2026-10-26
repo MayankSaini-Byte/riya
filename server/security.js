@@ -271,6 +271,27 @@ export async function writeStoredJson(key, value, ttlSeconds) {
   await redisCommand(command)
 }
 
+export async function deleteStoredKeys(keys) {
+  if (!Array.isArray(keys) || keys.length === 0) return
+  if (keys.length > 16 || keys.some(key => typeof key !== 'string' || !key.startsWith('bm-bip:upload:'))) {
+    throw new Error('Invalid Build in Public attachment key list')
+  }
+  await redisCommand(['DEL', ...keys])
+}
+
+export async function deleteBuildInPublicAttachment(attachment) {
+  if (!attachment) return false
+  const { uploadId, totalChunks } = attachment
+  if (!/^[\da-f-]{36}$/i.test(String(uploadId || '')) || !Number.isInteger(totalChunks) || totalChunks < 1 || totalChunks > 10) {
+    return false
+  }
+  await deleteStoredKeys([
+    `bm-bip:upload:${uploadId}:meta`,
+    ...Array.from({ length: totalChunks }, (_, chunk) => `bm-bip:upload:${uploadId}:chunk:${chunk}`),
+  ])
+  return true
+}
+
 export async function checkPublicSubmissionLimit(req) {
   // The platform always sets one of these headers, so an empty address means
   // the app is not behind the expected edge. Keep limiting rather than opening

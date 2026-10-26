@@ -1,4 +1,4 @@
-import { json, readStoredJson, recordAudit, requireSameOrigin, requireSession, setSecurityHeaders, writeStoredJson } from '../../server/security.js'
+import { deleteBuildInPublicAttachment, json, readStoredJson, recordAudit, requireSameOrigin, requireSession, setSecurityHeaders, writeStoredJson } from '../../server/security.js'
 import { sendAcceptanceEmail } from '../../server/email.js'
 
 const KEY = 'bm-bip:submissions:v1'
@@ -12,8 +12,8 @@ export default async function handler(req, res) {
     const submissions = await readStoredJson(KEY, [])
     if (!Array.isArray(submissions)) throw new Error('Submission storage is invalid')
     if (req.method === 'GET') return json(res, 200, { submissions })
-    if (req.method !== 'PATCH') {
-      res.setHeader('Allow', 'GET, PATCH')
+    if (!['PATCH', 'DELETE'].includes(req.method)) {
+      res.setHeader('Allow', 'GET, PATCH, DELETE')
       return json(res, 405, { error: 'Method not allowed' })
     }
     if (!requireSameOrigin(req, res)) return
@@ -22,6 +22,13 @@ export default async function handler(req, res) {
     const status = String(body.status || '')
     const index = submissions.findIndex(item => item.id === id)
     if (index < 0) return json(res, 404, { error: 'Submission not found.' })
+    if (req.method === 'DELETE') {
+      const [removed] = submissions.splice(index, 1)
+      if (removed.attachment) await deleteBuildInPublicAttachment(removed.attachment)
+      await writeStoredJson(KEY, submissions)
+      await recordAudit({ actor: actor.username, role: actor.role, action: 'build_in_public.application.deleted', contentType: 'contributionApplication', documentId: id })
+      return json(res, 200, { ok: true })
+    }
     if (!STATUSES.has(status)) return json(res, 400, { error: 'Choose pending, accepted, or rejected.' })
     const previous = submissions[index]
     submissions[index] = { ...previous, status, reviewedBy: actor.username, reviewedAt: new Date().toISOString() }

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { getBuildInPublicProjects } from '../../server/build-in-public-projects.js'
-import { checkPublicSubmissionLimit, json, readStoredJson, requireMethod, requireSameOrigin, setSecurityHeaders, writeStoredJson } from '../../server/security.js'
+import { checkPublicSubmissionLimit, deleteBuildInPublicAttachment, json, readStoredJson, requireMethod, requireSameOrigin, setSecurityHeaders, writeStoredJson } from '../../server/security.js'
 
 const KEY = 'bm-bip:submissions:v1'
 function normalizeProfile(value, platform) {
@@ -91,7 +91,13 @@ export default async function handler(req, res) {
       status: 'pending', createdAt: new Date().toISOString(),
     }
     submissions.unshift(application)
-    await writeStoredJson(KEY, submissions.slice(0, 500))
+    const retained = submissions.slice(0, 500)
+    await writeStoredJson(KEY, retained)
+    for (const expired of submissions.slice(500)) {
+      if (expired.attachment) {
+        try { await deleteBuildInPublicAttachment(expired.attachment) } catch { /* Its 90-day Redis TTL remains the fallback cleanup. */ }
+      }
+    }
     return json(res, 201, { ok: true, message: 'Your contribution request has been sent for review.' })
   } catch {
     return json(res, 503, { error: 'Contribution requests are temporarily unavailable.' })

@@ -13,7 +13,7 @@
 | Results | Published Sanity `siteResult` records | Portal; public view only shows published records | Implemented; placeholder local results hidden |
 | Announcements | Published Sanity `siteAnnouncement` records | Portal; public banner | Implemented |
 | Build in Public projects | Upstash Redis project records | Super Admin project editor; public page reads published projects | Public title, summary, tags, guidelines, repository link, and optional Drive image link; draft and archived records are private |
-| Build in Public contribution requests | Upstash Redis records and optional PDF/Word attachment chunks | Public application form; Super Admin review | Private application data; admin can accept or reject; each request stores its project ID and title snapshot |
+| Build in Public contribution requests | Upstash Redis records and optional PDF/Word attachment chunks | Public application form; Super Admin review | Private application data; admin can accept, reject, or delete; deleting a request removes its attachment keys too. The request list is capped at 500 records. |
 | Ideathon submissions | External Google Apps Script endpoint | External system | Needs external access; separate from Build in Public |
 | Branding/social links | Defaults and public Vite build variables | Source/deployment config | Verified |
 
@@ -28,7 +28,9 @@
 
 The Sanity portal supports `publicationStatus` values `draft`, `review`, `published`, and `archived` for events, results, and announcements. Build in Public project records are stored in Upstash and can be created, edited, published, archived, or deleted only by a Super Admin. The public endpoint returns published projects only; contribution submissions must reference a currently published project. Requests enter a private pending queue; only a Super Admin can accept or reject a request. Applicant names, student emails, profiles, answers, and attachments are not published on the public page. Only a Super Admin can add/remove portal accounts. Minds remain in Sanity Studio and are not editable in this portal.
 
-**Current limitation:** Sanity-managed events, results, and announcements still use a JSON editor. Contribution attachments are held in Upstash for 90 days; there is no automated applicant notification or password reset. Existing Sanity document schemas must be checked before writing production documents.
+**Current limitation:** Sanity-managed events, results, and announcements still use a JSON editor. Contribution attachment chunks have a 90-day expiry; request records remain until deleted or displaced by the 500-record cap. Super Admin acceptance sends an email through the configured Google Apps Script webhook, with retry available after failures. Password reset is not implemented. Existing Sanity document schemas must be checked before writing production documents.
+
+**Attachment storage detail:** PDF/DOC/DOCX uploads are base64-encoded into 512 KiB chunks stored as separate Upstash Redis keys (`bm-bip:upload:<uploadId>:chunk:<index>`), with metadata at `bm-bip:upload:<uploadId>:meta`. They are not stored in Google Drive. Temporary upload keys expire after one hour; after successful submission, metadata/chunks expire after 90 days. Deleting the request in the admin portal immediately deletes its metadata and chunk keys.
 
 ## Submission policy and retained legacy data
 

@@ -51,6 +51,7 @@ export const ADMIN_ROLES = [
   { value: 'event_organizer', label: 'Event Organizer', note: 'Runs events, results and announcements.' },
   { value: 'evaluator', label: 'Evaluator', note: 'Reads submissions to judge them.' },
   { value: 'read_only', label: 'Read Only', note: 'Can look, cannot change anything.' },
+  { value: 'super_admin', label: 'Super Admin', note: 'Full access to the whole portal, like you.' },
 ]
 
 const LINK_HINT = 'Full https:// link.'
