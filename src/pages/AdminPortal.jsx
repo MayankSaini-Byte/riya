@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { safeExternalUrl } from '../lib/buildInPublic'
 import DocumentForm from './admin/DocumentForm'
 import {
-  Chips, Combo, Confirm, Counter, Empty, Field, OptionCards, Pill, PublishRail, Search, Section,
+  Chips, Combo, Confirm, Counter, Empty, Field, OptionCards, PasswordInput, Pill, PublishRail, Search,
   Segmented, StatusDot, TextArea, TextInput, Toasts,
 } from './admin/fields'
 import {
@@ -14,8 +14,6 @@ import './AdminPortal.css'
 
 const CONTENT_TYPES = ['siteEvent', 'siteResult', 'siteAnnouncement']
 
-// Mirrors api/admin/content.js so the interface never offers an action the server
-// will refuse.
 const VIEWERS = {
   siteEvent: ['super_admin', 'event_organizer', 'read_only'],
   siteResult: ['super_admin', 'event_organizer', 'read_only'],
@@ -36,24 +34,8 @@ function canView(role, type) { return (VIEWERS[type] || []).includes(role) }
 function canEdit(role, type) { return (EDITORS[type] || []).includes(role) }
 function canPublish(role) { return role === 'super_admin' || role === 'event_organizer' }
 
-function stageTone(value) {
-  return PUBLICATION_STAGES.find(stage => stage.value === value)?.tone || 'off'
-}
-
-function countChanges(before, after) {
-  if (!before) return 1
-  const keys = new Set([...Object.keys(before), ...Object.keys(after)])
-  let changed = 0
-  for (const key of keys) {
-    if (key.startsWith('_') && key !== '_type') continue
-    if (JSON.stringify(before[key] ?? null) !== JSON.stringify(after[key] ?? null)) changed += 1
-  }
-  return changed
-}
-
-function article(word) {
-  return /^[aeiou]/i.test(word) ? 'an' : 'a'
-}
+function stageTone(value) { return PUBLICATION_STAGES.find(stage => stage.value === value)?.tone || 'off' }
+function stageLabel(value) { return PUBLICATION_STAGES.find(stage => stage.value === value)?.label || 'Draft' }
 
 function describe(list) {
   if (list.length === 1) return list[0]
@@ -71,14 +53,28 @@ async function request(path, options = {}) {
   return payload
 }
 
+/* --- Small inline icons ------------------------------------------------- */
+const Ic = {
+  moon: <svg viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M16.5 11.2A6.5 6.5 0 018.8 3.5a6.5 6.5 0 107.7 7.7z" strokeLinejoin="round" /></svg>,
+  sun: <svg viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="10" cy="10" r="3.5" /><path d="M10 1.5v2M10 16.5v2M3.3 3.3l1.4 1.4M15.3 15.3l1.4 1.4M1.5 10h2M16.5 10h2M3.3 16.7l1.4-1.4M15.3 4.7l1.4-1.4" strokeLinecap="round" /></svg>,
+  plus: <svg viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"><path d="M10 4v12M4 10h12" /></svg>,
+  trash: <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3.5 5.5h13M8 5.5V4a1 1 0 011-1h2a1 1 0 011 1v1.5M6 5.5l.7 10a1 1 0 001 1h4.6a1 1 0 001-1l.7-10" /></svg>,
+  back: <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M11.5 5l-5 5 5 5" /></svg>,
+}
+
 export default function AdminPortal() {
   const navigate = useNavigate()
   const [user, setUser] = useState(null)
   const [authChecked, setAuthChecked] = useState(false)
-  const [view, setView] = useState('build-in-public')
+  const [view, setView] = useState('dashboard')
   const [busy, setBusy] = useState(false)
   const [toasts, setToasts] = useState([])
 
+  const [theme, setTheme] = useState(() => {
+    try { return localStorage.getItem('bm-admin-theme') || 'light' } catch { return 'light' }
+  })
+
+  const [counts, setCounts] = useState({})
   const [documents, setDocuments] = useState([])
   const [eventIds, setEventIds] = useState([])
   const [selectedId, setSelectedId] = useState(null)
@@ -94,6 +90,7 @@ export default function AdminPortal() {
   const [bipSection, setBipSection] = useState('projects')
   const [projectDraft, setProjectDraft] = useState(EMPTY_PROJECT)
   const [editingProjectId, setEditingProjectId] = useState(null)
+  const [projectFormOpen, setProjectFormOpen] = useState(false)
   const [projectQuery, setProjectQuery] = useState('')
   const [requestFilter, setRequestFilter] = useState('pending')
   const [openRequest, setOpenRequest] = useState(null)
@@ -108,6 +105,7 @@ export default function AdminPortal() {
   const [loginError, setLoginError] = useState('')
 
   const toastTimers = useRef(new Map())
+  const pendingNew = useRef(null)
 
   const say = useCallback((message, tone = 'go') => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
@@ -130,10 +128,12 @@ export default function AdminPortal() {
     toastTimers.current.clear()
   }, [])
 
+  useEffect(() => { try { localStorage.setItem('bm-admin-theme', theme) } catch { /* ignore */ } }, [theme])
+
   const form = CONTENT_TYPES.includes(view) ? FORMS[view] : null
+  const editing = Boolean(form) && Boolean(draft)
   const readOnly = Boolean(form) && !canEdit(user?.role, view)
   const dirty = Boolean(draft) && (!original || JSON.stringify(original) !== JSON.stringify(draft))
-  const changeCount = draft ? countChanges(original, draft) : 0
   const gaps = form && draft ? listRequiredGaps(form, draft) : []
 
   const clearEditor = useCallback(() => {
@@ -164,22 +164,37 @@ export default function AdminPortal() {
       .finally(() => setAuthChecked(true))
   }, [])
 
-  // Land every role on a view it is actually allowed to open.
+  // Keep every role on a view it may open.
   useEffect(() => {
-    if (!user) return
-    const allowed = view === 'build-in-public' || view === 'accounts' || view === 'audit'
+    if (!user || view === 'dashboard') return
+    const allowed = ['build-in-public', 'accounts', 'audit'].includes(view)
       ? user.role === 'super_admin'
-      : canView(user.role, view)
-    if (!allowed) {
-      setView(user.role === 'super_admin' ? 'build-in-public' : user.role === 'content_editor' ? 'siteAnnouncement' : 'siteEvent')
-    }
+      : CONTENT_TYPES.includes(view) ? canView(user.role, view) : true
+    if (!allowed) setView('dashboard')
   }, [user, view])
 
   useEffect(() => {
     if (!user) return
     clearEditor()
     setDocQuery('')
+    setProjectFormOpen(false)
 
+    if (view === 'dashboard') {
+      const types = CONTENT_TYPES.filter(type => canView(user.role, type))
+      setBusy(true)
+      Promise.all(types.map(type =>
+        request(`/api/admin/content?type=${type}`).then(result => [type, (result.documents || []).length]).catch(() => [type, 0]),
+      ))
+        .then(entries => setCounts(Object.fromEntries(entries)))
+        .finally(() => setBusy(false))
+      if (user.role === 'super_admin') {
+        Promise.all([
+          request('/api/admin/build-in-public').then(result => setSubmissions(result.submissions || [])).catch(() => {}),
+          request('/api/admin/build-in-public-projects').then(result => setProjects(result.projects || [])).catch(() => {}),
+        ])
+      }
+      return
+    }
     if (view === 'build-in-public') {
       if (user.role !== 'super_admin') return
       setBusy(true)
@@ -210,10 +225,18 @@ export default function AdminPortal() {
         .finally(() => setBusy(false))
       return
     }
-    if (CONTENT_TYPES.includes(view)) loadDocuments(view)
+    if (CONTENT_TYPES.includes(view)) {
+      loadDocuments(view)
+      // Opened via a dashboard "+" — start a blank draft once we land here.
+      if (pendingNew.current === view) {
+        pendingNew.current = null
+        setSelectedId(null)
+        setOriginal(null)
+        setDraft(blankDocument(view))
+      }
+    }
   }, [user, view, loadDocuments, clearEditor, say])
 
-  // Results pick their event from a list rather than a typed id.
   useEffect(() => {
     if (view !== 'siteResult' || !user) return
     request('/api/admin/content?type=siteEvent')
@@ -221,7 +244,6 @@ export default function AdminPortal() {
       .catch(() => setEventIds([]))
   }, [view, user])
 
-  // Warn before losing unsaved work to a tab close.
   useEffect(() => {
     if (!dirty) return
     function onBeforeUnload(event) { event.preventDefault(); event.returnValue = '' }
@@ -260,7 +282,7 @@ export default function AdminPortal() {
     try { await request('/api/auth/logout', { method: 'POST', body: '{}' }) }
     finally {
       setUser(null)
-      setView('build-in-public')
+      setView('dashboard')
       setDocuments([])
       clearEditor()
       navigate('/kazi_binary_admins', { replace: true })
@@ -268,7 +290,6 @@ export default function AdminPortal() {
   }
 
   function openDocument(doc) {
-    if (dirty && !window.confirm('Leave this document? Your unsaved changes will be lost.')) return
     setSelectedId(doc._id)
     setOriginal(doc)
     setDraft(doc)
@@ -277,12 +298,23 @@ export default function AdminPortal() {
   }
 
   function startNew() {
-    if (dirty && !window.confirm('Leave this document? Your unsaved changes will be lost.')) return
     setSelectedId(null)
     setOriginal(null)
     setDraft(blankDocument(view))
     setRawMode(false)
     setRawError('')
+  }
+
+  // Create a new doc in another collection, from the dashboard.
+  function startNewIn(type) {
+    if (type === view) { startNew(); return }
+    pendingNew.current = type
+    setView(type)
+  }
+
+  function leaveEditor() {
+    if (dirty && !window.confirm('Leave this document? Your unsaved changes will be lost.')) return
+    clearEditor()
   }
 
   function updateDraft(next) {
@@ -299,11 +331,10 @@ export default function AdminPortal() {
   function onRawChange(text) {
     setRawText(text)
     try {
-      const parsed = JSON.parse(text)
-      setDraft(parsed)
+      setDraft(JSON.parse(text))
       setRawError('')
     } catch {
-      setRawError('Not valid JSON yet, so the form is still showing the last good version.')
+      setRawError('Not valid JSON yet, so the form still shows the last good version.')
     }
   }
 
@@ -366,11 +397,18 @@ export default function AdminPortal() {
     finally { setBusy(false) }
   }
 
-  function beginProjectEdit(project = null) {
+  function openProjectForm(project = null) {
     setEditingProjectId(project?.id || null)
     setProjectDraft(project
       ? { ...EMPTY_PROJECT, ...project, tags: Array.isArray(project.tags) ? project.tags : [] }
       : { ...EMPTY_PROJECT })
+    setProjectFormOpen(true)
+  }
+
+  function closeProjectForm() {
+    setEditingProjectId(null)
+    setProjectDraft({ ...EMPTY_PROJECT })
+    setProjectFormOpen(false)
   }
 
   async function saveProject(event) {
@@ -383,7 +421,7 @@ export default function AdminPortal() {
       })
       await refreshProjects()
       say(editingProjectId ? 'Project saved.' : 'Project created.')
-      beginProjectEdit()
+      closeProjectForm()
     } catch (reason) { say(reason.message, 'stop') }
     finally { setBusy(false) }
   }
@@ -393,7 +431,7 @@ export default function AdminPortal() {
     try {
       await request('/api/admin/build-in-public-projects', { method: 'DELETE', body: JSON.stringify({ id: project.id }) })
       await refreshProjects()
-      if (editingProjectId === project.id) beginProjectEdit()
+      if (editingProjectId === project.id) closeProjectForm()
       say('Project deleted.')
     } catch (reason) { say(reason.message, 'stop') }
     finally { setBusy(false) }
@@ -472,9 +510,9 @@ export default function AdminPortal() {
     return projects.filter(project => `${project.title} ${project.summary} ${(project.tags || []).join(' ')}`.toLowerCase().includes(needle))
   }, [projects, projectQuery])
 
-  const requestCounts = useMemo(() => submissions.reduce((counts, item) => {
-    counts[item.status] = (counts[item.status] || 0) + 1
-    return counts
+  const requestCounts = useMemo(() => submissions.reduce((acc, item) => {
+    acc[item.status] = (acc[item.status] || 0) + 1
+    return acc
   }, {}), [submissions])
 
   const visibleRequests = useMemo(() => (
@@ -487,481 +525,481 @@ export default function AdminPortal() {
     return auditEntries.filter(entry => `${entry.action} ${entry.actor} ${entry.role} ${entry.contentType || ''} ${entry.documentId || ''}`.toLowerCase().includes(needle))
   }, [auditEntries, auditQuery])
 
+  /* ---------------------------------------------------------------- boot */
+
   if (!authChecked) {
-    return <main className="admin-boot"><span className="admin-spinner" />Checking your session</main>
+    return <main className="admin-boot" data-theme={theme}><span className="admin-spinner" />Checking your session</main>
   }
 
   if (!user) {
     return (
-      <main className="admin-gate">
+      <main className="admin-gate" data-theme={theme}>
         <section className="admin-gate-card" aria-labelledby="admin-gate-title">
-          <a className="admin-brand" href="/"><img src="/binary-minds-logo.jpg" alt="" /><span>Binary Minds</span></a>
-          <p className="admin-kicker">Backstage</p>
-          <h1 id="admin-gate-title">Sign in to the workspace</h1>
-          <p className="admin-lede">Events, results, announcements and Build in Public live here.</p>
+          <a className="admin-gate-brand" href="/"><img src="/binary-minds-logo.jpg" alt="" /><span>Binary Minds</span></a>
+          <h1 id="admin-gate-title">Sign in</h1>
+          <p className="admin-lede">Manage events, results, announcements and Build in Public.</p>
           {loginError && <div className="admin-alert" role="alert">{loginError}</div>}
           <form onSubmit={signIn} className="admin-gate-form">
             <Field label="Username" htmlFor="admin-user">
               <TextInput id="admin-user" autoComplete="username" value={username} onChange={event => setUsername(event.target.value)} required />
             </Field>
             <Field label="Password" htmlFor="admin-pass">
-              <TextInput id="admin-pass" type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} required />
+              <PasswordInput id="admin-pass" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} required />
             </Field>
-            <button className="aprimary" disabled={busy}>{busy ? 'Signing in' : 'Sign in'}</button>
+            <button className="ks-btn ks-btn-primary" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
           </form>
-          <a className="admin-gate-back" href="/">Back to the public site</a>
+          <a className="admin-gate-back" href="/">← Back to the site</a>
         </section>
       </main>
     )
   }
 
+  /* --------------------------------------------------------------- nav */
+
   const navGroups = [
-    {
-      title: 'Community',
-      items: [{ key: 'build-in-public', label: 'Build in Public', badge: requestCounts.pending, show: user.role === 'super_admin' }],
-    },
-    {
-      title: 'Content',
-      items: CONTENT_TYPES.map(type => ({ key: type, label: FORMS[type].plural, show: canView(user.role, type) })),
-    },
-    {
-      title: 'Workspace',
-      items: [
-        { key: 'accounts', label: 'Access', show: user.role === 'super_admin' },
-        { key: 'audit', label: 'Activity log', show: user.role === 'super_admin' },
-      ],
-    },
+    { items: [{ key: 'dashboard', label: 'Dashboard', show: true }] },
+    { label: 'Content', items: CONTENT_TYPES.map(type => ({ key: type, label: FORMS[type].plural, show: canView(user.role, type) })) },
+    { label: 'Community', items: [{ key: 'build-in-public', label: 'Build in Public', badge: requestCounts.pending, show: user.role === 'super_admin' }] },
+    { label: 'Admin', items: [
+      { key: 'accounts', label: 'Access', show: user.role === 'super_admin' },
+      { key: 'audit', label: 'Activity log', show: user.role === 'super_admin' },
+    ] },
   ]
 
-  const headings = {
-    'build-in-public': { kicker: 'Super Admin only', title: 'Build in Public' },
-    accounts: { kicker: 'Super Admin only', title: 'Access' },
-    audit: { kicker: 'Super Admin only', title: 'Activity log' },
-  }
-  const heading = headings[view] || { kicker: readOnly ? 'View only' : 'Content', title: form?.plural }
+  const title = view === 'dashboard' ? 'Dashboard'
+    : view === 'build-in-public' ? 'Build in Public'
+      : view === 'accounts' ? 'Access'
+        : view === 'audit' ? 'Activity log'
+          : form?.plural
 
   return (
-    <main className="admin-shell">
+    <main className="admin-shell" data-theme={theme}>
       <a className="admin-skip" href="#admin-work">Skip to content</a>
 
-      <aside className="admin-rail">
-        <a className="admin-brand" href="/"><img src="/binary-minds-logo.jpg" alt="" /><span>Binary Minds</span></a>
-        <nav className="admin-nav" aria-label="Sections">
-          {navGroups.map(group => {
+      <aside className="ks-rail">
+        <div className="ks-rail-top">
+          <a className="ks-brand" href="/">
+            <span className="ks-brand-badge"><img src="/binary-minds-logo.jpg" alt="" /></span>
+            <span className="ks-brand-name">Binary Minds</span>
+          </a>
+          <button className="ks-iconbtn ks-theme" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} title="Toggle theme">
+            {theme === 'dark' ? Ic.sun : Ic.moon}
+          </button>
+        </div>
+
+        <nav className="ks-nav" aria-label="Sections">
+          {navGroups.map((group, index) => {
             const items = group.items.filter(item => item.show)
             if (!items.length) return null
             return (
-              <div className="admin-nav-group" key={group.title}>
-                <p className="admin-nav-title">{group.title}</p>
+              <div className="ks-nav-group" key={group.label || index}>
+                {group.label && <p className="ks-nav-label">{group.label}</p>}
                 {items.map(item => (
                   <button
                     key={item.key}
                     type="button"
-                    className={`admin-nav-item${view === item.key ? ' is-on' : ''}`}
+                    className={`ks-nav-item${view === item.key ? ' is-on' : ''}`}
                     aria-current={view === item.key ? 'page' : undefined}
                     onClick={() => setView(item.key)}
                   >
                     <span>{item.label}</span>
-                    {item.badge > 0 && <span className="admin-nav-badge">{item.badge}</span>}
+                    {item.badge > 0 && <span className="ks-nav-badge">{item.badge}</span>}
                   </button>
                 ))}
               </div>
             )
           })}
         </nav>
-        <div className="admin-whoami">
-          <span className="admin-whoami-name">{user.username}</span>
-          <span className="admin-whoami-role">{user.role.replaceAll('_', ' ')}</span>
-          <button type="button" className="admin-signout" onClick={signOut}>Sign out</button>
+
+        <div className="ks-whoami">
+          <span className="ks-whoami-name">{user.username}</span>
+          <span className="ks-whoami-role">{user.role.replaceAll('_', ' ')}</span>
+          <button type="button" className="ks-signout" onClick={signOut}>Sign out</button>
         </div>
       </aside>
 
-      <div className="admin-work" id="admin-work">
-        <header className="admin-top">
-          <div>
-            <p className="admin-kicker">{heading.kicker}</p>
-            <h1>{heading.title}</h1>
-          </div>
-          <div className="admin-top-actions">
-            {view === 'build-in-public' && (
-              <button type="button" className="asecondary" disabled={busy} onClick={bipSection === 'projects' ? refreshProjects : refreshSubmissions}>Refresh</button>
-            )}
-            {view === 'audit' && (
-              <button type="button" className="asecondary" disabled={busy} onClick={() => request('/api/admin/audit').then(result => setAuditEntries(result.entries || [])).catch(reason => say(reason.message, 'stop'))}>Refresh</button>
-            )}
-            {form && !readOnly && <button type="button" className="aprimary" onClick={startNew}>New {form.label.toLowerCase()}</button>}
-          </div>
-        </header>
+      <div className="ks-main" id="admin-work">
+        <div className="ks-main-inner">
 
-        {form && (
-          <div className="admin-split">
-            <section className="admin-finder" aria-label={`${form.plural} list`}>
-              <Search value={docQuery} onChange={setDocQuery} placeholder={`Find ${form.plural.toLowerCase()}`} count={visibleDocuments.length} />
-              <div className="admin-finder-list">
-                {busy && !documents.length ? <p className="admin-quiet">Loading</p>
-                  : visibleDocuments.length ? visibleDocuments.map(doc => (
-                    <button
-                      key={doc._id}
-                      type="button"
-                      className={`admin-finder-row${selectedId === doc._id ? ' is-on' : ''}`}
-                      onClick={() => openDocument(doc)}
-                    >
-                      <StatusDot tone={stageTone(doc.publicationStatus)} title={doc.publicationStatus || 'No stage'} />
-                      <span className="admin-finder-text">
-                        <strong>{doc.title || 'Untitled'}</strong>
-                        <code>{doc.publicationStatus || 'no stage'}</code>
+          {/* ---------------- Dashboard ---------------- */}
+          {view === 'dashboard' && (
+            <>
+              <div className="ks-head"><h1 className="ks-title">Dashboard</h1></div>
+
+              <section className="ks-dash-group">
+                <p className="ks-dash-label">Content</p>
+                <div className="ks-dash-grid">
+                  {CONTENT_TYPES.filter(type => canView(user.role, type)).map(type => (
+                    <div className="ks-card" key={type} role="button" tabIndex={0}
+                      onClick={() => setView(type)}
+                      onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setView(type) } }}>
+                      <span className="ks-card-main">
+                        <span className="ks-card-title">{FORMS[type].plural}</span>
+                        <span className="ks-card-meta">{counts[type] ?? '—'} {counts[type] === 1 ? 'entry' : 'entries'}</span>
                       </span>
-                    </button>
-                  ))
-                    : <p className="admin-quiet">{docQuery ? 'Nothing matches that.' : `No ${form.plural.toLowerCase()} yet.`}</p>}
-              </div>
-            </section>
-
-            <section className="admin-editor" aria-label={`${form.label} editor`}>
-              {!draft ? (
-                <Empty title={`Pick ${article(form.label)} ${form.label.toLowerCase()} to edit`} action={!readOnly && <button type="button" className="aprimary" onClick={startNew}>New {form.label.toLowerCase()}</button>}>
-                  {form.blurb}
-                </Empty>
-              ) : (
-                <form onSubmit={saveDocument} className="admin-editor-form">
-                  <div className="admin-editor-top">
-                    <div className="admin-editor-id">
-                      <h2>{draft.title || `New ${form.label.toLowerCase()}`}</h2>
-                      {selectedId ? <code>{selectedId}</code> : <Pill tone="hold">Not saved yet</Pill>}
-                    </div>
-                    <div className="admin-editor-tools">
-                      <button type="button" className={`atoggle${rawMode ? ' is-on' : ''}`} onClick={toggleRaw} aria-pressed={rawMode}>Raw JSON</button>
-                      {selectedId && user.role === 'super_admin' && (
-                        <Confirm onConfirm={deleteDocument} disabled={busy} confirmLabel={`Yes, delete this ${form.label.toLowerCase()}`}>Delete</Confirm>
+                      {canEdit(user.role, type) && (
+                        <button type="button" className="ks-card-add" aria-label={`New ${FORMS[type].label.toLowerCase()}`}
+                          onClick={event => { event.stopPropagation(); startNewIn(type) }}>{Ic.plus}</button>
                       )}
                     </div>
-                  </div>
+                  ))}
+                </div>
+              </section>
 
-                  <PublishRail
-                    value={draft.publicationStatus || 'draft'}
-                    stages={PUBLICATION_STAGES}
-                    readOnly={readOnly}
-                    locked={canPublish(user.role) ? [] : ['published']}
-                    lockedNote="You can take this to review. An organizer publishes it."
-                    onChange={stage => updateDraft({ ...draft, publicationStatus: stage })}
-                  />
-
-                  {readOnly && <p className="admin-note">Your role can read this but not change it.</p>}
-
-                  {rawMode ? (
-                    <div className="admin-raw">
-                      <TextArea rows={22} spellCheck="false" value={rawText} onChange={event => onRawChange(event.target.value)} readOnly={readOnly} />
-                      {rawError && <p className="admin-raw-error">{rawError}</p>}
-                    </div>
-                  ) : (
-                    <DocumentForm
-                      form={form}
-                      document={draft}
-                      onChange={updateDraft}
-                      sources={{ events: eventIds }}
-                      readOnly={readOnly}
-                    />
-                  )}
-
-                  {!readOnly && (
-                    <div className={`admin-savebar${dirty ? ' is-live' : ''}`}>
-                      <span className="admin-savebar-state">
-                        {dirty ? `${changeCount} unsaved ${changeCount === 1 ? 'change' : 'changes'}` : 'Everything saved'}
-                        {gaps.length > 0 && <em>Still needs {describe(gaps)}</em>}
+              {user.role === 'super_admin' && (
+                <section className="ks-dash-group">
+                  <p className="ks-dash-label">Community</p>
+                  <div className="ks-dash-grid">
+                    <div className="ks-card" role="button" tabIndex={0}
+                      onClick={() => { setBipSection('projects'); setView('build-in-public') }}
+                      onKeyDown={event => { if (event.key === 'Enter') setView('build-in-public') }}>
+                      <span className="ks-card-main">
+                        <span className="ks-card-title">Build in Public</span>
+                        <span className="ks-card-meta">{projects.length} projects · {requestCounts.pending || 0} waiting</span>
                       </span>
-                      <div className="admin-savebar-actions">
-                        {dirty && original && <button type="button" className="asecondary" onClick={() => updateDraft(original)}>Discard</button>}
-                        <button className="aprimary" disabled={busy || !dirty || gaps.length > 0}>
-                          {busy ? 'Saving' : selectedId ? 'Save changes' : `Create ${form.label.toLowerCase()}`}
-                        </button>
-                      </div>
                     </div>
-                  )}
-                </form>
-              )}
-            </section>
-          </div>
-        )}
-
-        {view === 'build-in-public' && (
-          <>
-            <nav className="admin-tabs" aria-label="Build in Public sections">
-              <button type="button" className={bipSection === 'projects' ? 'is-on' : ''} onClick={() => setBipSection('projects')}>
-                Projects <span>{projects.length}</span>
-              </button>
-              <button type="button" className={bipSection === 'applications' ? 'is-on' : ''} onClick={() => setBipSection('applications')}>
-                Contribution requests {requestCounts.pending > 0 && <span className="is-live">{requestCounts.pending}</span>}
-              </button>
-            </nav>
-
-            {bipSection === 'projects' ? (
-              <div className="admin-split">
-                <section className="admin-finder" aria-label="Projects list">
-                  <Search value={projectQuery} onChange={setProjectQuery} placeholder="Find projects" count={visibleProjects.length} />
-                  <div className="admin-finder-list">
-                    {busy && !projects.length ? <p className="admin-quiet">Loading</p>
-                      : visibleProjects.length ? visibleProjects.map(project => (
-                        <div key={project.id} className={`admin-project-row${editingProjectId === project.id ? ' is-on' : ''}`}>
-                          <button type="button" className="admin-project-open" onClick={() => beginProjectEdit(project)}>
-                            <StatusDot tone={PROJECT_VISIBILITY.find(stage => stage.value === project.status)?.tone || 'off'} title={project.status} />
-                            <span className="admin-finder-text">
-                              <strong>{project.title}</strong>
-                              <code>{project.status}{project.difficulty ? ` · ${project.difficulty}` : ''}</code>
-                            </span>
-                          </button>
-                          <Confirm onConfirm={() => deleteProject(project)} disabled={busy} confirmLabel="Yes, delete">Delete</Confirm>
-                        </div>
-                      ))
-                        : <p className="admin-quiet">{projectQuery ? 'Nothing matches that.' : 'No projects yet.'}</p>}
                   </div>
-                  <button type="button" className="asecondary admin-finder-add" onClick={() => beginProjectEdit()}>New project</button>
                 </section>
+              )}
 
-                <section className="admin-editor" aria-label="Project editor">
-                  <form className="admin-editor-form" onSubmit={saveProject}>
-                    <div className="admin-editor-top">
-                      <div className="admin-editor-id">
-                        <h2>{projectDraft.title || (editingProjectId ? 'Edit project' : 'New project')}</h2>
-                        {editingProjectId ? <code>{editingProjectId}</code> : <Pill tone="hold">Not saved yet</Pill>}
+              {user.role === 'super_admin' && (
+                <section className="ks-dash-group">
+                  <p className="ks-dash-label">Admin</p>
+                  <div className="ks-dash-grid">
+                    <div className="ks-card" role="button" tabIndex={0} onClick={() => setView('accounts')} onKeyDown={e => { if (e.key === 'Enter') setView('accounts') }}>
+                      <span className="ks-card-main"><span className="ks-card-title">Access</span><span className="ks-card-meta">People who can sign in</span></span>
+                    </div>
+                    <div className="ks-card" role="button" tabIndex={0} onClick={() => setView('audit')} onKeyDown={e => { if (e.key === 'Enter') setView('audit') }}>
+                      <span className="ks-card-main"><span className="ks-card-title">Activity log</span><span className="ks-card-meta">Recent actions</span></span>
+                    </div>
+                  </div>
+                </section>
+              )}
+            </>
+          )}
+
+          {/* ---------------- Content: list ---------------- */}
+          {form && !editing && (
+            <>
+              <div className="ks-head">
+                <h1 className="ks-title">{form.plural}</h1>
+                <div className="ks-head-actions">
+                  <Search value={docQuery} onChange={setDocQuery} placeholder={`Search ${form.plural.toLowerCase()}`} />
+                  {!readOnly && <button type="button" className="ks-btn ks-btn-primary" onClick={() => startNew()}>{Ic.plus} Add</button>}
+                </div>
+              </div>
+
+              {busy && !documents.length ? <p className="admin-quiet">Loading…</p>
+                : visibleDocuments.length ? (
+                  <div className="ks-table-wrap">
+                    <table className="ks-table">
+                      <thead><tr><th>Title</th><th>Stage</th><th>Slug</th><th>On site</th></tr></thead>
+                      <tbody>
+                        {visibleDocuments.map(doc => (
+                          <tr key={doc._id} onClick={() => openDocument(doc)}>
+                            <td className="ks-cell-title">{doc.title || 'Untitled'}</td>
+                            <td><Pill tone={stageTone(doc.publicationStatus)}>{stageLabel(doc.publicationStatus)}</Pill></td>
+                            <td className="ks-cell-slug">{doc.slug?.current || doc._id}</td>
+                            <td><span className="ks-live"><StatusDot tone={doc.publicationStatus === 'published' ? 'go' : 'off'} />{doc.publicationStatus === 'published' ? 'Live' : 'Hidden'}</span></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <Empty title={docQuery ? 'Nothing matches that' : `No ${form.plural.toLowerCase()} yet`} action={!readOnly && !docQuery && <button type="button" className="ks-btn ks-btn-primary" onClick={() => startNew()}>{Ic.plus} Add {form.label.toLowerCase()}</button>}>
+                    {form.blurb}
+                  </Empty>
+                )}
+            </>
+          )}
+
+          {/* ---------------- Content: edit ---------------- */}
+          {form && editing && (
+            <form onSubmit={saveDocument} className="ks-edit">
+              <div className="ks-head">
+                <div className="ks-crumb">
+                  <button type="button" className="ks-iconbtn" onClick={leaveEditor} aria-label="Back to list">{Ic.back}</button>
+                  <button type="button" onClick={leaveEditor}>{form.plural}</button>
+                  <span className="ks-crumb-sep">/</span>
+                  <span className="ks-crumb-now">{draft.title || `New ${form.label.toLowerCase()}`}</span>
+                </div>
+                <div className="ks-edit-toolbar">
+                  <button type="button" className={`ks-btn ks-btn-ghost ks-btn-sm${rawMode ? ' is-on' : ''}`} onClick={toggleRaw} aria-pressed={rawMode}>JSON</button>
+                  {selectedId && user.role === 'super_admin' && (
+                    <Confirm onConfirm={deleteDocument} disabled={busy} confirmLabel={`Delete this ${form.label.toLowerCase()}`}>{Ic.trash}</Confirm>
+                  )}
+                  {!readOnly && <button type="submit" className="ks-btn ks-btn-primary" disabled={busy || !dirty || gaps.length > 0}>{busy ? 'Saving…' : 'Save'}</button>}
+                </div>
+              </div>
+
+              <div className="ks-stage-row">
+                <span>Visibility</span>
+                <PublishRail
+                  value={draft.publicationStatus || 'draft'}
+                  stages={PUBLICATION_STAGES}
+                  readOnly={readOnly}
+                  locked={canPublish(user.role) ? [] : ['published']}
+                  lockedNote="You can take this to review. An organizer publishes it."
+                  onChange={stage => updateDraft({ ...draft, publicationStatus: stage })}
+                />
+              </div>
+
+              {readOnly && <p className="admin-alert" style={{ marginBottom: 24 }}>Your role can read this but not change it.</p>}
+
+              {rawMode ? (
+                <div className="ks-raw">
+                  <TextArea rows={22} spellCheck="false" className="actrl actrl-area actrl-mono" value={rawText} onChange={event => onRawChange(event.target.value)} readOnly={readOnly} />
+                  {rawError && <p className="ks-raw-error">{rawError}</p>}
+                </div>
+              ) : (
+                <DocumentForm form={form} document={draft} onChange={updateDraft} sources={{ events: eventIds }} readOnly={readOnly} />
+              )}
+
+              {!readOnly && dirty && (
+                <div className="ks-savebar">
+                  <span className="ks-savebar-state">
+                    Unsaved changes{gaps.length > 0 && <> · <em>needs {describe(gaps)}</em></>}
+                  </span>
+                  <div className="ks-savebar-actions">
+                    {original && <button type="button" className="ks-btn ks-btn-ghost ks-btn-sm" onClick={() => updateDraft(original)}>Discard</button>}
+                    <button type="submit" className="ks-btn ks-btn-primary ks-btn-sm" disabled={busy || gaps.length > 0}>{busy ? 'Saving…' : selectedId ? 'Save changes' : 'Create'}</button>
+                  </div>
+                </div>
+              )}
+            </form>
+          )}
+
+          {/* ---------------- Build in Public ---------------- */}
+          {view === 'build-in-public' && (
+            <>
+              <div className="ks-head">
+                <h1 className="ks-title">Build in Public</h1>
+                <div className="ks-head-actions">
+                  {bipSection === 'projects'
+                    ? <button type="button" className="ks-btn ks-btn-primary" onClick={() => openProjectForm()}>{Ic.plus} Add project</button>
+                    : <button type="button" className="ks-btn ks-btn-ghost" disabled={busy} onClick={refreshSubmissions}>Refresh</button>}
+                </div>
+              </div>
+
+              <nav className="ks-tabs" aria-label="Build in Public sections">
+                <button type="button" className={bipSection === 'projects' ? 'is-on' : ''} onClick={() => setBipSection('projects')}>Projects <span>{projects.length}</span></button>
+                <button type="button" className={bipSection === 'applications' ? 'is-on' : ''} onClick={() => setBipSection('applications')}>Requests {requestCounts.pending > 0 && <span className="is-live">{requestCounts.pending}</span>}</button>
+              </nav>
+
+              {bipSection === 'projects' ? (
+                projectFormOpen ? (
+                  <form className="ks-edit" onSubmit={saveProject}>
+                    <div className="ks-head">
+                      <div className="ks-crumb">
+                        <button type="button" className="ks-iconbtn" onClick={closeProjectForm} aria-label="Back">{Ic.back}</button>
+                        <button type="button" onClick={closeProjectForm}>Projects</button>
+                        <span className="ks-crumb-sep">/</span>
+                        <span className="ks-crumb-now">{projectDraft.title || (editingProjectId ? 'Edit project' : 'New project')}</span>
                       </div>
+                      <button type="submit" className="ks-btn ks-btn-primary" disabled={busy}>{busy ? 'Saving…' : editingProjectId ? 'Save' : 'Create'}</button>
                     </div>
 
-                    <PublishRail
-                      value={projectDraft.status}
-                      stages={PROJECT_VISIBILITY}
-                      onChange={stage => setProjectDraft({ ...projectDraft, status: stage })}
-                    />
-
-                    <div className="aform">
-                      <Section title="Project" defaultOpen>
-                        <div className="afield-grid">
-                          <Field label="Project name" required htmlFor="bip-title" wide>
-                            <TextInput id="bip-title" value={projectDraft.title} maxLength={140} required onChange={event => setProjectDraft({ ...projectDraft, title: event.target.value })} />
-                            <Counter value={projectDraft.title} max={140} />
-                          </Field>
-                          <Field label="What it is" required htmlFor="bip-summary" wide hint="Shown on the public card. Two or three sentences.">
-                            <TextArea id="bip-summary" rows={4} maxLength={1200} required value={projectDraft.summary} onChange={event => setProjectDraft({ ...projectDraft, summary: event.target.value })} />
-                            <Counter value={projectDraft.summary} max={1200} />
-                          </Field>
-                          <Field label="How to contribute" required htmlFor="bip-guidelines" wide hint="Shown with the project and inside its request form.">
-                            <TextArea id="bip-guidelines" rows={4} maxLength={1200} required value={projectDraft.guidelines} onChange={event => setProjectDraft({ ...projectDraft, guidelines: event.target.value })} />
-                            <Counter value={projectDraft.guidelines} max={1200} />
-                          </Field>
-                        </div>
-                      </Section>
-
-                      <Section title="How it is listed" defaultOpen>
-                        <div className="afield-grid">
-                          <Field label="Track" htmlFor="bip-category" hint="Groups the project on the public ledger.">
-                            <Combo id="bip-category" value={projectDraft.category} options={PROJECT_CATEGORIES} placeholder="Pick or type a track" onChange={next => setProjectDraft({ ...projectDraft, category: next })} />
-                          </Field>
-                          <Field label="Difficulty">
-                            <Segmented name="Difficulty" value={projectDraft.difficulty} options={PROJECT_DIFFICULTIES} onChange={next => setProjectDraft({ ...projectDraft, difficulty: next === projectDraft.difficulty ? '' : next })} />
-                          </Field>
-                          <Field label="Tags" htmlFor="bip-tags" wide hint="Press Enter after each tag, or tap a suggestion.">
-                            <Chips id="bip-tags" value={projectDraft.tags} suggestions={TAG_SUGGESTIONS} placeholder="Type a tag and press Enter" onChange={next => setProjectDraft({ ...projectDraft, tags: next })} />
-                          </Field>
-                        </div>
-                      </Section>
-
-                      <Section title="Owner">
-                        <div className="afield-grid">
-                          <Field label="Owner name" htmlFor="bip-owner" hint="Shown as the project byline.">
-                            <TextInput id="bip-owner" value={projectDraft.authorName} maxLength={80} placeholder="Binary Minds Core" onChange={event => setProjectDraft({ ...projectDraft, authorName: event.target.value })} />
-                          </Field>
-                          <Field label="Owner role" htmlFor="bip-owner-role">
-                            <TextInput id="bip-owner-role" value={projectDraft.authorRole} maxLength={80} placeholder="Maintainers" onChange={event => setProjectDraft({ ...projectDraft, authorRole: event.target.value })} />
-                          </Field>
-                          <Field label="Owner avatar" htmlFor="bip-avatar" wide hint="Google Drive image set to anyone with the link can view.">
-                            <TextInput id="bip-avatar" type="url" value={projectDraft.authorAvatarUrl} placeholder="https://drive.google.com/file/d/" onChange={event => setProjectDraft({ ...projectDraft, authorAvatarUrl: event.target.value })} />
-                          </Field>
-                        </div>
-                      </Section>
-
-                      <Section title="Links">
-                        <div className="afield-grid">
-                          <Field label="Repository" htmlFor="bip-repo" wide hint="Full https:// link to the code.">
-                            <TextInput id="bip-repo" type="url" value={projectDraft.repositoryUrl} placeholder="https://github.com/organization/project" onChange={event => setProjectDraft({ ...projectDraft, repositoryUrl: event.target.value })} />
-                          </Field>
-                          <Field label="Cover image" htmlFor="bip-image" wide hint="Google Drive image set to anyone with the link can view.">
-                            <TextInput id="bip-image" type="url" value={projectDraft.imageDriveUrl} placeholder="https://drive.google.com/file/d/" onChange={event => setProjectDraft({ ...projectDraft, imageDriveUrl: event.target.value })} />
-                          </Field>
-                        </div>
-                      </Section>
+                    <div className="ks-stage-row">
+                      <span>Visibility</span>
+                      <PublishRail value={projectDraft.status} stages={PROJECT_VISIBILITY} onChange={stage => setProjectDraft({ ...projectDraft, status: stage })} />
                     </div>
 
-                    <div className="admin-savebar is-live">
-                      <span className="admin-savebar-state">{editingProjectId ? 'Editing an existing project' : 'This will be created as a draft'}</span>
-                      <div className="admin-savebar-actions">
-                        <button type="button" className="asecondary" onClick={() => beginProjectEdit()}>Clear</button>
-                        <button className="aprimary" disabled={busy}>{busy ? 'Saving' : editingProjectId ? 'Save project' : 'Create project'}</button>
+                    <div className="afield-grid">
+                      <Field label="Project name" required htmlFor="bip-title" wide>
+                        <TextInput id="bip-title" value={projectDraft.title} maxLength={140} required onChange={event => setProjectDraft({ ...projectDraft, title: event.target.value })} />
+                        <Counter value={projectDraft.title} max={140} />
+                      </Field>
+                      <Field label="What it is" required htmlFor="bip-summary" wide hint="Shown on the public card.">
+                        <TextArea id="bip-summary" rows={4} maxLength={1200} required value={projectDraft.summary} onChange={event => setProjectDraft({ ...projectDraft, summary: event.target.value })} />
+                        <Counter value={projectDraft.summary} max={1200} />
+                      </Field>
+                      <Field label="How to contribute" required htmlFor="bip-guidelines" wide hint="Shown with the project and in its request form.">
+                        <TextArea id="bip-guidelines" rows={4} maxLength={1200} required value={projectDraft.guidelines} onChange={event => setProjectDraft({ ...projectDraft, guidelines: event.target.value })} />
+                        <Counter value={projectDraft.guidelines} max={1200} />
+                      </Field>
+                      <Field label="Track" htmlFor="bip-category" hint="Groups the project on the public ledger.">
+                        <Combo id="bip-category" value={projectDraft.category} options={PROJECT_CATEGORIES} placeholder="Pick or type a track" onChange={next => setProjectDraft({ ...projectDraft, category: next })} />
+                      </Field>
+                      <Field label="Difficulty">
+                        <Segmented name="Difficulty" value={projectDraft.difficulty} options={PROJECT_DIFFICULTIES} onChange={next => setProjectDraft({ ...projectDraft, difficulty: next === projectDraft.difficulty ? '' : next })} />
+                      </Field>
+                      <Field label="Tags" htmlFor="bip-tags" wide hint="Press Enter after each tag, or tap a suggestion.">
+                        <Chips id="bip-tags" value={projectDraft.tags} suggestions={TAG_SUGGESTIONS} placeholder="Type a tag and press Enter" onChange={next => setProjectDraft({ ...projectDraft, tags: next })} />
+                      </Field>
+                      <Field label="Owner name" htmlFor="bip-owner" hint="Shown as the project byline.">
+                        <TextInput id="bip-owner" value={projectDraft.authorName} maxLength={80} placeholder="Binary Minds Core" onChange={event => setProjectDraft({ ...projectDraft, authorName: event.target.value })} />
+                      </Field>
+                      <Field label="Owner role" htmlFor="bip-owner-role">
+                        <TextInput id="bip-owner-role" value={projectDraft.authorRole} maxLength={80} placeholder="Maintainers" onChange={event => setProjectDraft({ ...projectDraft, authorRole: event.target.value })} />
+                      </Field>
+                      <Field label="Repository" htmlFor="bip-repo" wide hint="Full https:// link to the code.">
+                        <TextInput id="bip-repo" type="url" value={projectDraft.repositoryUrl} placeholder="https://github.com/organization/project" onChange={event => setProjectDraft({ ...projectDraft, repositoryUrl: event.target.value })} />
+                      </Field>
+                      <Field label="Cover image" htmlFor="bip-image" wide hint="Google Drive image set to “anyone with the link can view”.">
+                        <TextInput id="bip-image" type="url" value={projectDraft.imageDriveUrl} placeholder="https://drive.google.com/file/d/…" onChange={event => setProjectDraft({ ...projectDraft, imageDriveUrl: event.target.value })} />
+                      </Field>
+                      <Field label="Owner avatar" htmlFor="bip-avatar" wide hint="Optional Google Drive image link.">
+                        <TextInput id="bip-avatar" type="url" value={projectDraft.authorAvatarUrl} placeholder="https://drive.google.com/file/d/…" onChange={event => setProjectDraft({ ...projectDraft, authorAvatarUrl: event.target.value })} />
+                      </Field>
+                    </div>
+
+                    <div className="ks-savebar">
+                      <span className="ks-savebar-state">{editingProjectId ? 'Editing a project' : 'New project — saved as a draft'}</span>
+                      <div className="ks-savebar-actions">
+                        <button type="button" className="ks-btn ks-btn-ghost ks-btn-sm" onClick={closeProjectForm}>Cancel</button>
+                        <button type="submit" className="ks-btn ks-btn-primary ks-btn-sm" disabled={busy}>{busy ? 'Saving…' : editingProjectId ? 'Save' : 'Create'}</button>
                       </div>
                     </div>
                   </form>
-                </section>
-              </div>
-            ) : (
-              <section className="admin-queue">
-                <div className="admin-queue-filters" role="group" aria-label="Filter requests">
-                  {[
-                    { key: 'pending', label: 'Waiting' },
-                    { key: 'accepted', label: 'Accepted' },
-                    { key: 'rejected', label: 'Rejected' },
-                    { key: 'all', label: 'All' },
-                  ].map(option => (
-                    <button
-                      key={option.key}
-                      type="button"
-                      className={requestFilter === option.key ? 'is-on' : ''}
-                      onClick={() => setRequestFilter(option.key)}
-                    >
-                      {option.label}
-                      <span>{option.key === 'all' ? submissions.length : requestCounts[option.key] || 0}</span>
-                    </button>
-                  ))}
-                </div>
+                ) : (
+                  <>
+                    <div style={{ marginBottom: 16 }}><Search value={projectQuery} onChange={setProjectQuery} placeholder="Search projects" /></div>
+                    {busy && !projects.length ? <p className="admin-quiet">Loading…</p>
+                      : visibleProjects.length ? (
+                        <div className="ks-table-wrap">
+                          <table className="ks-table">
+                            <thead><tr><th>Project</th><th>Stage</th><th>Track</th><th /></tr></thead>
+                            <tbody>
+                              {visibleProjects.map(project => (
+                                <tr key={project.id} onClick={() => openProjectForm(project)}>
+                                  <td className="ks-cell-title">{project.title}</td>
+                                  <td><Pill tone={PROJECT_VISIBILITY.find(stage => stage.value === project.status)?.tone || 'off'}>{project.status}</Pill></td>
+                                  <td className="ks-cell-muted">{project.category || '—'}</td>
+                                  <td onClick={event => event.stopPropagation()} style={{ textAlign: 'right' }}>
+                                    <Confirm onConfirm={() => deleteProject(project)} disabled={busy} confirmLabel="Delete">Delete</Confirm>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : <Empty title={projectQuery ? 'Nothing matches that' : 'No projects yet'} action={!projectQuery && <button type="button" className="ks-btn ks-btn-primary" onClick={() => openProjectForm()}>{Ic.plus} Add project</button>}>Published projects appear on the public Build in Public page.</Empty>}
+                  </>
+                )
+              ) : (
+                <section className="ks-queue">
+                  <div className="ks-queue-filters" role="group" aria-label="Filter requests">
+                    {[{ key: 'pending', label: 'Waiting' }, { key: 'accepted', label: 'Accepted' }, { key: 'rejected', label: 'Rejected' }, { key: 'all', label: 'All' }].map(option => (
+                      <button key={option.key} type="button" className={requestFilter === option.key ? 'is-on' : ''} onClick={() => setRequestFilter(option.key)}>
+                        {option.label}<span>{option.key === 'all' ? submissions.length : requestCounts[option.key] || 0}</span>
+                      </button>
+                    ))}
+                  </div>
 
-                {busy && !submissions.length ? <p className="admin-quiet">Loading</p>
-                  : visibleRequests.length ? visibleRequests.map(submission => {
-                    const expanded = openRequest === submission.id
-                    const github = safeExternalUrl(submission.githubProfile)
-                    const linkedin = safeExternalUrl(submission.linkedinProfile)
-                    return (
-                      <article className="admin-request" key={submission.id}>
-                        <header>
-                          <div className="admin-request-who">
+                  {busy && !submissions.length ? <p className="admin-quiet">Loading…</p>
+                    : visibleRequests.length ? visibleRequests.map(submission => {
+                      const expanded = openRequest === submission.id
+                      const github = safeExternalUrl(submission.githubProfile)
+                      const linkedin = safeExternalUrl(submission.linkedinProfile)
+                      return (
+                        <article className="ks-request" key={submission.id}>
+                          <div className="ks-request-who">
                             <Pill tone={submission.status === 'accepted' ? 'go' : submission.status === 'rejected' ? 'stop' : 'hold'}>{submission.status}</Pill>
                             <h2>{submission.fullName}</h2>
-                            <code>{new Date(submission.createdAt).toLocaleDateString()}</code>
+                            <time>{new Date(submission.createdAt).toLocaleDateString()}</time>
                           </div>
-                          <p className="admin-request-for">
-                            wants to work on <strong>{submission.project || 'Binary Minds Open AI Agent Framework'}</strong>
-                          </p>
-                          <p className="admin-request-contact">
+                          <p className="ks-request-for">wants to work on <strong>{submission.project || 'Binary Minds Open AI Agent Framework'}</strong></p>
+                          <p className="ks-request-contact">
                             <a href={`mailto:${submission.studentEmail}`}>{submission.studentEmail}</a>
                             {github && <a href={github} target="_blank" rel="noopener noreferrer">GitHub</a>}
                             {linkedin && <a href={linkedin} target="_blank" rel="noopener noreferrer">LinkedIn</a>}
                           </p>
-                        </header>
-
-                        {submission.status === 'accepted' && (
-                          <p className={`admin-request-email ${submission.emailNotificationStatus === 'sent' ? 'is-sent' : 'is-failed'}`}>
-                            {submission.emailNotificationStatus === 'sent'
-                              ? 'Acceptance email sent.'
-                              : submission.emailNotificationStatus === 'failed'
-                                ? `Acceptance email failed. ${submission.emailNotificationError || 'Check the email setup and retry.'}`
-                                : 'Acceptance email has not gone out yet.'}
-                          </p>
-                        )}
-
-                        <button type="button" className="admin-request-more" aria-expanded={expanded} onClick={() => setOpenRequest(expanded ? null : submission.id)}>
-                          {expanded ? 'Hide what they wrote' : 'Read what they wrote'}
-                        </button>
-
-                        {expanded && (
-                          <div className="admin-request-body">
-                            <h3>Why they want to contribute</h3>
-                            <p>{submission.motivation}</p>
-                            <h3>What they would build</h3>
-                            <p>{submission.contributionIdea}</p>
-                            {submission.attachment && (
-                              <button type="button" className="asecondary" disabled={busy} onClick={() => downloadAttachment(submission)}>
-                                Download {submission.attachment.fileName} ({(submission.attachment.size / 1024 / 1024).toFixed(1)} MB)
-                              </button>
-                            )}
+                          {submission.status === 'accepted' && (
+                            <p className={`ks-request-email ${submission.emailNotificationStatus === 'sent' ? 'is-sent' : 'is-failed'}`}>
+                              {submission.emailNotificationStatus === 'sent' ? 'Acceptance email sent.'
+                                : submission.emailNotificationStatus === 'failed' ? `Acceptance email failed. ${submission.emailNotificationError || 'Check the email setup and retry.'}`
+                                  : 'Acceptance email has not gone out yet.'}
+                            </p>
+                          )}
+                          <button type="button" className="ks-request-more" aria-expanded={expanded} onClick={() => setOpenRequest(expanded ? null : submission.id)}>
+                            {expanded ? 'Hide what they wrote' : 'Read what they wrote'}
+                          </button>
+                          {expanded && (
+                            <div className="ks-request-body">
+                              <h3>Why they want to contribute</h3><p>{submission.motivation}</p>
+                              <h3>What they would build</h3><p>{submission.contributionIdea}</p>
+                              {submission.attachment && <button type="button" className="ks-btn ks-btn-ghost ks-btn-sm" disabled={busy} onClick={() => downloadAttachment(submission)}>Download {submission.attachment.fileName} ({(submission.attachment.size / 1024 / 1024).toFixed(1)} MB)</button>}
+                            </div>
+                          )}
+                          <div className="ks-request-actions">
+                            {submission.status !== 'accepted' && <button type="button" className="ks-btn ks-btn-primary ks-btn-sm" disabled={busy} onClick={() => reviewSubmission(submission.id, 'accepted')}>Accept &amp; email</button>}
+                            {submission.status === 'accepted' && submission.emailNotificationStatus !== 'sent' && <button type="button" className="ks-btn ks-btn-ghost ks-btn-sm" disabled={busy} onClick={() => reviewSubmission(submission.id, 'accepted')}>Retry email</button>}
+                            {submission.status !== 'rejected' && <Confirm onConfirm={() => reviewSubmission(submission.id, 'rejected')} disabled={busy} confirmLabel="Reject">Reject</Confirm>}
                           </div>
-                        )}
+                        </article>
+                      )
+                    }) : <Empty title={requestFilter === 'pending' ? 'Nothing waiting on you' : 'Nothing here'}>{requestFilter === 'pending' ? 'New contribution requests show up here.' : 'Try another filter.'}</Empty>}
+                </section>
+              )}
+            </>
+          )}
 
-                        <footer className="admin-request-actions">
-                          {submission.status !== 'accepted' && (
-                            <button type="button" className="aprimary" disabled={busy} onClick={() => reviewSubmission(submission.id, 'accepted')}>Accept and email them</button>
-                          )}
-                          {submission.status === 'accepted' && submission.emailNotificationStatus !== 'sent' && (
-                            <button type="button" className="asecondary" disabled={busy} onClick={() => reviewSubmission(submission.id, 'accepted')}>Retry the email</button>
-                          )}
-                          {submission.status !== 'rejected' && (
-                            <Confirm onConfirm={() => reviewSubmission(submission.id, 'rejected')} disabled={busy} confirmLabel="Yes, reject">Reject</Confirm>
-                          )}
-                        </footer>
-                      </article>
-                    )
-                  })
-                    : <Empty title={requestFilter === 'pending' ? 'Nothing waiting on you' : 'Nothing here'}>
-                      {requestFilter === 'pending' ? 'New contribution requests will show up here.' : 'Try another filter.'}
-                    </Empty>}
-              </section>
-            )}
-          </>
-        )}
-
-        {view === 'accounts' && (
-          <div className="admin-split">
-            <section className="admin-finder" aria-label="Accounts">
-              <p className="admin-finder-head">{adminUsers.length} with access</p>
-              <div className="admin-finder-list">
-                {busy && !adminUsers.length ? <p className="admin-quiet">Loading</p> : adminUsers.map(account => (
-                  <div className="admin-account" key={account.username}>
-                    <span className="admin-finder-text">
+          {/* ---------------- Access ---------------- */}
+          {view === 'accounts' && (
+            <>
+              <div className="ks-head"><h1 className="ks-title">Access</h1></div>
+              <div className="ks-table-wrap" style={{ marginBottom: 26 }}>
+                {busy && !adminUsers.length ? <p className="admin-quiet" style={{ padding: 18 }}>Loading…</p> : adminUsers.map(account => (
+                  <div className="ks-account" key={account.username}>
+                    <span className="ks-account-id">
                       <strong>{account.username}</strong>
-                      <code>{account.role.replaceAll('_', ' ')} · {account.managed ? 'added here' : 'server account'}</code>
+                      <small>{account.role.replaceAll('_', ' ')} · {account.managed ? 'added here' : 'server account'}</small>
                     </span>
-                    {account.managed && (
-                      <Confirm onConfirm={() => removeAdminUser(account.username)} disabled={busy} confirmLabel="Yes, remove">Remove</Confirm>
-                    )}
+                    {account.managed && <Confirm onConfirm={() => removeAdminUser(account.username)} disabled={busy} confirmLabel="Remove">Remove</Confirm>}
                   </div>
                 ))}
               </div>
-            </section>
 
-            <section className="admin-editor" aria-label="Add access">
-              <form className="admin-editor-form" onSubmit={addAdminUser}>
-                <div className="admin-editor-top">
-                  <div className="admin-editor-id"><h2>Give someone access</h2></div>
-                </div>
-                <div className="aform">
-                  <Section title="Account" defaultOpen>
-                    <div className="afield-grid">
-                      <Field label="Email or username" required htmlFor="acc-name" wide>
-                        <TextInput id="acc-name" autoComplete="off" value={newAccount.username} required onChange={event => setNewAccount({ ...newAccount, username: event.target.value })} />
-                      </Field>
-                      <Field label="Initial password" required htmlFor="acc-pass" wide hint="At least 14 characters. Share it with them securely.">
-                        <TextInput id="acc-pass" type="password" autoComplete="new-password" minLength={14} value={newAccount.password} required onChange={event => setNewAccount({ ...newAccount, password: event.target.value })} />
-                      </Field>
-                    </div>
-                  </Section>
-                  <Section title="What they can do" defaultOpen>
+              <form className="ks-edit" onSubmit={addAdminUser}>
+                <h2 style={{ margin: '0 0 16px', fontSize: '1.1rem', fontWeight: 650 }}>Give someone access</h2>
+                <div className="afield-grid">
+                  <Field label="Email or username" required htmlFor="acc-name" wide>
+                    <TextInput id="acc-name" autoComplete="off" value={newAccount.username} required onChange={event => setNewAccount({ ...newAccount, username: event.target.value })} />
+                  </Field>
+                  <Field label="Initial password" required htmlFor="acc-pass" wide hint="At least 14 characters. Share it with them securely.">
+                    <PasswordInput id="acc-pass" autoComplete="new-password" minLength={14} value={newAccount.password} required onChange={event => setNewAccount({ ...newAccount, password: event.target.value })} />
+                  </Field>
+                  <div className="afield afield-wide">
+                    <span className="afield-label">What they can do</span>
                     <OptionCards name="Role" value={newAccount.role} options={ADMIN_ROLES} onChange={role => setNewAccount({ ...newAccount, role })} />
-                  </Section>
-                </div>
-                <div className="admin-savebar is-live">
-                  <span className="admin-savebar-state">Only a Super Admin can add accounts.</span>
-                  <div className="admin-savebar-actions">
-                    <button className="aprimary" disabled={busy}>{busy ? 'Adding' : 'Add account'}</button>
                   </div>
                 </div>
+                <div className="ks-savebar">
+                  <span className="ks-savebar-state">Only a Super Admin can add accounts.</span>
+                  <button type="submit" className="ks-btn ks-btn-primary ks-btn-sm" disabled={busy}>{busy ? 'Adding…' : 'Add account'}</button>
+                </div>
               </form>
-            </section>
-          </div>
-        )}
+            </>
+          )}
 
-        {view === 'audit' && (
-          <section className="admin-log">
-            <Search value={auditQuery} onChange={setAuditQuery} placeholder="Find an action or person" count={visibleAudit.length} />
-            {busy && !auditEntries.length ? <p className="admin-quiet">Loading</p>
-              : visibleAudit.length ? (
-                <ol className="admin-log-list">
-                  {visibleAudit.map((entry, index) => (
-                    <li key={`${entry.at}-${index}`}>
-                      <code className="admin-log-action">{entry.action}</code>
-                      <span className="admin-log-actor">{entry.actor}<small>{entry.role?.replaceAll('_', ' ')}</small></span>
-                      <code className="admin-log-target">{entry.contentType ? `${entry.contentType}${entry.documentId ? ` · ${entry.documentId}` : ''}` : 'authentication'}</code>
-                      <time dateTime={entry.at}>{new Date(entry.at).toLocaleString()}</time>
-                    </li>
-                  ))}
-                </ol>
-              ) : <p className="admin-quiet">{auditQuery ? 'Nothing matches that.' : 'No activity recorded yet.'}</p>}
-          </section>
-        )}
+          {/* ---------------- Activity log ---------------- */}
+          {view === 'audit' && (
+            <>
+              <div className="ks-head">
+                <h1 className="ks-title">Activity log</h1>
+                <div className="ks-head-actions">
+                  <Search value={auditQuery} onChange={setAuditQuery} placeholder="Search actions" />
+                  <button type="button" className="ks-btn ks-btn-ghost" disabled={busy} onClick={() => request('/api/admin/audit').then(result => setAuditEntries(result.entries || [])).catch(reason => say(reason.message, 'stop'))}>Refresh</button>
+                </div>
+              </div>
+              {busy && !auditEntries.length ? <p className="admin-quiet">Loading…</p>
+                : visibleAudit.length ? (
+                  <div className="ks-log">
+                    {visibleAudit.map((entry, index) => (
+                      <div className="ks-log-row" key={`${entry.at}-${index}`}>
+                        <code className="ks-log-action">{entry.action}</code>
+                        <span className="ks-log-actor">{entry.actor}<small>{entry.role?.replaceAll('_', ' ')}</small></span>
+                        <code className="ks-log-target">{entry.contentType ? `${entry.contentType}${entry.documentId ? ` · ${entry.documentId}` : ''}` : 'authentication'}</code>
+                        <time dateTime={entry.at}>{new Date(entry.at).toLocaleString()}</time>
+                      </div>
+                    ))}
+                  </div>
+                ) : <p className="admin-quiet">{auditQuery ? 'Nothing matches that.' : 'No activity recorded yet.'}</p>}
+            </>
+          )}
+
+        </div>
       </div>
 
       <Toasts items={toasts} onDismiss={dismiss} />

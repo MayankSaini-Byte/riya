@@ -46,9 +46,16 @@ async function getAdminUsers() {
   }
   if (!Array.isArray(users)) throw new Error('ADMIN_USERS_JSON must be an array')
   const envUsers = users.filter(user => user && typeof user.username === 'string' && /^[A-Za-z0-9._@-]{1,64}$/.test(user.username) && typeof user.passwordHash === 'string' && ROLES.has(user.role))
-  const managedUsers = process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
-    ? await readStoredJson('bm-admin:users:v1', [])
-    : []
+  // ADMIN_USERS_LOCAL_ONLY=true makes the app trust ADMIN_USERS_JSON alone and
+  // skip the Redis-stored accounts. It is for local development pointed at a
+  // shared Redis: it lets your .env admin sign in without the Redis copy of the
+  // same username overriding it. Production never sets this flag, so its
+  // behaviour is unchanged.
+  const managedUsers = process.env.ADMIN_USERS_LOCAL_ONLY === 'true'
+    ? []
+    : process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
+      ? await readStoredJson('bm-admin:users:v1', [])
+      : []
   if (!Array.isArray(managedUsers)) throw new Error('Stored admin accounts are invalid')
   const merged = new Map(envUsers.map(user => [user.username.toLowerCase(), user]))
   for (const user of managedUsers) {

@@ -25,6 +25,49 @@ export function TextArea({ rows = 4, ...props }) {
   return <textarea className="actrl actrl-area" rows={rows} {...props} />
 }
 
+// Password field with a show/hide toggle, so you can check what you typed
+// before submitting. Defaults to hidden.
+export function PasswordInput({ id, value, onChange, autoComplete, minLength, required, placeholder }) {
+  const [shown, setShown] = useState(false)
+  return (
+    <div className="apass">
+      <input
+        id={id}
+        className="actrl"
+        type={shown ? 'text' : 'password'}
+        autoComplete={autoComplete}
+        minLength={minLength}
+        required={required}
+        placeholder={placeholder}
+        value={value}
+        onChange={onChange}
+      />
+      <button
+        type="button"
+        className="apass-toggle"
+        aria-pressed={shown}
+        aria-label={shown ? 'Hide password' : 'Show password'}
+        title={shown ? 'Hide password' : 'Show password'}
+        onClick={() => setShown(value => !value)}
+      >
+        {shown ? (
+          <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M2.5 2.5l15 15" />
+            <path d="M8.1 4.4A8 8 0 0110 4.3c4.4 0 7.4 4 8.3 5.7a1 1 0 010 .9 15 15 0 01-2 2.8" />
+            <path d="M12.2 12.5A3 3 0 017.6 8" />
+            <path d="M5.3 5.5A14 14 0 001.7 9.9a1 1 0 000 .9c.9 1.7 3.9 5.7 8.3 5.7a8 8 0 003.1-.6" />
+          </svg>
+        ) : (
+          <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M1.7 10.4a1 1 0 010-.9C2.6 7.8 5.6 3.8 10 3.8s7.4 4 8.3 5.7a1 1 0 010 .9c-.9 1.7-3.9 5.7-8.3 5.7s-7.4-4-8.3-5.7z" />
+            <circle cx="10" cy="10" r="2.6" />
+          </svg>
+        )}
+      </button>
+    </div>
+  )
+}
+
 export function Counter({ value, max }) {
   if (!max) return null
   const used = String(value || '').length
