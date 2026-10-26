@@ -3,36 +3,43 @@ import { useNavigate } from 'react-router-dom'
 import { safeExternalUrl } from '../lib/buildInPublic'
 import DocumentForm from './admin/DocumentForm'
 import {
-  Chips, Combo, Confirm, Counter, Empty, Field, OptionCards, PasswordInput, Pill, PublishRail, Search,
+  Chips, Combo, Confirm, Counter, Empty, Field, ImageField, OptionCards, PasswordInput, Pill, PublishRail, Search,
   Segmented, StatusDot, TextArea, TextInput, Toasts,
 } from './admin/fields'
+import { SITE_SANITY, imageUrl, prepareImage, setSanityTarget } from './admin/media'
 import {
   ADMIN_ROLES, FORMS, PROJECT_CATEGORIES, PROJECT_DIFFICULTIES, PROJECT_VISIBILITY, PUBLICATION_STAGES,
   TAG_SUGGESTIONS, blankDocument, listRequiredGaps,
 } from './admin/schema'
 import './AdminPortal.css'
 
-const CONTENT_TYPES = ['siteEvent', 'siteResult', 'siteAnnouncement']
+const CONTENT_TYPES = ['siteEvent', 'siteResult', 'siteAnnouncement', 'mind']
 
 const VIEWERS = {
   siteEvent: ['super_admin', 'event_organizer', 'read_only'],
   siteResult: ['super_admin', 'event_organizer', 'read_only'],
   siteAnnouncement: ['super_admin', 'content_editor', 'event_organizer', 'read_only'],
+  mind: ['super_admin', 'content_editor', 'event_organizer', 'read_only'],
 }
 const EDITORS = {
   siteEvent: ['super_admin', 'event_organizer'],
   siteResult: ['super_admin', 'event_organizer'],
   siteAnnouncement: ['super_admin', 'content_editor', 'event_organizer'],
+  mind: ['super_admin', 'content_editor'],
 }
 
 const EMPTY_PROJECT = {
   title: '', summary: '', guidelines: '', tags: [], category: '', difficulty: '',
-  authorName: '', authorRole: '', authorAvatarUrl: '', repositoryUrl: '', imageDriveUrl: '', status: 'draft',
+  authorName: '', authorRole: '', authorAvatarUrl: '', repositoryUrl: '', imageUrl: '', status: 'draft',
 }
 
 function canView(role, type) { return (VIEWERS[type] || []).includes(role) }
 function canEdit(role, type) { return (EDITORS[type] || []).includes(role) }
-function canPublish(role) { return role === 'super_admin' || role === 'event_organizer' }
+function canPublish(role, type) {
+  return role === 'super_admin'
+    || (role === 'event_organizer' && type !== 'mind')
+    || (role === 'content_editor' && type === 'mind')
+}
 
 function stageTone(value) { return PUBLICATION_STAGES.find(stage => stage.value === value)?.tone || 'off' }
 function stageLabel(value) { return PUBLICATION_STAGES.find(stage => stage.value === value)?.label || 'Draft' }
@@ -60,6 +67,21 @@ const Ic = {
   plus: <svg viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"><path d="M10 4v12M4 10h12" /></svg>,
   trash: <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3.5 5.5h13M8 5.5V4a1 1 0 011-1h2a1 1 0 011 1v1.5M6 5.5l.7 10a1 1 0 001 1h4.6a1 1 0 001-1l.7-10" /></svg>,
   back: <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M11.5 5l-5 5 5 5" /></svg>,
+  signout: <svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M8 4H5a1 1 0 00-1 1v10a1 1 0 001 1h3M13 13.5L16.5 10 13 6.5M16.5 10H8" /></svg>,
+}
+
+function SkeletonTable({ columns = 4, rows = 5 }) {
+  return (
+    <div className="ks-table-wrap" aria-busy="true" aria-label="Loading">
+      <table className="ks-table">
+        <tbody>
+          {Array.from({ length: rows }, (_, row) => (
+            <tr key={row}>{Array.from({ length: columns }, (_, col) => <td key={col}><span className="ks-skel" style={{ width: col === 0 ? '70%' : '45%' }} /></td>)}</tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
 }
 
 export default function AdminPortal() {
@@ -75,6 +97,7 @@ export default function AdminPortal() {
   })
 
   const [counts, setCounts] = useState({})
+  const [serverSanity, setServerSanity] = useState(null)
   const [documents, setDocuments] = useState([])
   const [eventIds, setEventIds] = useState([])
   const [selectedId, setSelectedId] = useState(null)
@@ -105,6 +128,7 @@ export default function AdminPortal() {
   const [loginError, setLoginError] = useState('')
 
   const toastTimers = useRef(new Map())
+  const docCache = useRef({})
   const pendingNew = useRef(null)
 
   const say = useCallback((message, tone = 'go') => {
@@ -130,6 +154,17 @@ export default function AdminPortal() {
 
   useEffect(() => { try { localStorage.setItem('bm-admin-theme', theme) } catch { /* ignore */ } }, [theme])
 
+  // Shrink in the browser, then store in Sanity. Returns { assetId, url }.
+  const uploadImage = useCallback(async file => {
+    const prepared = await prepareImage(file)
+    const result = await request('/api/admin/upload-image', { method: 'POST', body: JSON.stringify(prepared) })
+    return result.image
+  }, [])
+
+  const fetchPreview = useCallback(url => (
+    request('/api/admin/link-preview', { method: 'POST', body: JSON.stringify({ url }) })
+  ), [])
+
   const form = CONTENT_TYPES.includes(view) ? FORMS[view] : null
   const editing = Boolean(form) && Boolean(draft)
   const readOnly = Boolean(form) && !canEdit(user?.role, view)
@@ -148,7 +183,11 @@ export default function AdminPortal() {
     setBusy(true)
     try {
       const result = await request(`/api/admin/content?type=${encodeURIComponent(type)}`)
-      setDocuments(result.documents || [])
+      const docs = result.documents || []
+      if (result.sanity) { setServerSanity(result.sanity); setSanityTarget(result.sanity) }
+      docCache.current[type] = docs
+      setDocuments(docs)
+      setCounts(current => ({ ...current, [type]: docs.length }))
     } catch (reason) {
       setDocuments([])
       say(reason.message, 'stop')
@@ -198,12 +237,14 @@ export default function AdminPortal() {
     if (view === 'build-in-public') {
       if (user.role !== 'super_admin') return
       setBusy(true)
-      Promise.all([request('/api/admin/build-in-public'), request('/api/admin/build-in-public-projects')])
-        .then(([applications, projectResult]) => {
-          setSubmissions(applications.submissions || [])
-          setProjects(projectResult.projects || [])
+      // Load projects and requests separately, so one failing never hides the other.
+      Promise.allSettled([request('/api/admin/build-in-public-projects'), request('/api/admin/build-in-public')])
+        .then(([projectResult, requestResult]) => {
+          if (projectResult.status === 'fulfilled') setProjects(projectResult.value.projects || [])
+          else say(`Projects could not load: ${projectResult.reason.message}`, 'stop')
+          if (requestResult.status === 'fulfilled') setSubmissions(requestResult.value.submissions || [])
+          else say(`Requests could not load: ${requestResult.reason.message}`, 'stop')
         })
-        .catch(reason => { setSubmissions([]); setProjects([]); say(reason.message, 'stop') })
         .finally(() => setBusy(false))
       return
     }
@@ -226,6 +267,8 @@ export default function AdminPortal() {
       return
     }
     if (CONTENT_TYPES.includes(view)) {
+      // Show the last copy straight away, then refresh it in the background.
+      setDocuments(docCache.current[view] || [])
       loadDocuments(view)
       // Opened via a dashboard "+" — start a blank draft once we land here.
       if (pendingNew.current === view) {
@@ -253,10 +296,16 @@ export default function AdminPortal() {
 
   useEffect(() => {
     function onKeyDown(event) {
+      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName) || event.target.isContentEditable
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
         if (!dirty || readOnly || !draft) return
         event.preventDefault()
         saveDocument()
+      } else if (event.key === '/' && !typing) {
+        const search = window.document.querySelector('.asearch input')
+        if (search) { event.preventDefault(); search.focus() }
+      } else if (event.key === 'Escape' && !typing && editing) {
+        leaveEditor()
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -344,7 +393,7 @@ export default function AdminPortal() {
     if (rawError) { say('Fix the JSON before saving.', 'stop'); return }
     const missing = listRequiredGaps(form, draft)
     if (missing.length) { say(`Add ${describe(missing)} before saving.`, 'stop'); return }
-    if (draft.publicationStatus === 'published' && !canPublish(user.role)) {
+    if (draft.publicationStatus === 'published' && !canPublish(user.role, view)) {
       say('Your role cannot publish. Save it in review and ask an organizer to publish.', 'stop')
       return
     }
@@ -568,7 +617,7 @@ export default function AdminPortal() {
 
   const navGroups = [
     { items: [{ key: 'dashboard', label: 'Dashboard', show: true }] },
-    { label: 'Content', items: CONTENT_TYPES.map(type => ({ key: type, label: FORMS[type].plural, show: canView(user.role, type) })) },
+    { label: 'Content', items: CONTENT_TYPES.map(type => ({ key: type, label: FORMS[type].plural, count: counts[type], show: canView(user.role, type) })) },
     { label: 'Community', items: [{ key: 'build-in-public', label: 'Build in Public', badge: requestCounts.pending, show: user.role === 'super_admin' }] },
     { label: 'Admin', items: [
       { key: 'accounts', label: 'Access', show: user.role === 'super_admin' },
@@ -592,9 +641,6 @@ export default function AdminPortal() {
             <span className="ks-brand-badge"><img src="/binary-minds-logo.jpg" alt="" /></span>
             <span className="ks-brand-name">Binary Minds</span>
           </a>
-          <button className="ks-iconbtn ks-theme" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} title="Toggle theme">
-            {theme === 'dark' ? Ic.sun : Ic.moon}
-          </button>
         </div>
 
         <nav className="ks-nav" aria-label="Sections">
@@ -613,7 +659,8 @@ export default function AdminPortal() {
                     onClick={() => setView(item.key)}
                   >
                     <span>{item.label}</span>
-                    {item.badge > 0 && <span className="ks-nav-badge">{item.badge}</span>}
+                    {item.badge > 0 ? <span className="ks-nav-badge">{item.badge}</span>
+                      : item.count != null && <span className="ks-nav-count">{item.count}</span>}
                   </button>
                 ))}
               </div>
@@ -621,14 +668,22 @@ export default function AdminPortal() {
           })}
         </nav>
 
-        <div className="ks-whoami">
-          <span className="ks-whoami-name">{user.username}</span>
-          <span className="ks-whoami-role">{user.role.replaceAll('_', ' ')}</span>
-          <button type="button" className="ks-signout" onClick={signOut}>Sign out</button>
-        </div>
       </aside>
 
       <div className="ks-main" id="admin-work">
+        <header className="ks-topbar">
+          <button type="button" className="ks-iconbtn" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} title={theme === 'dark' ? 'Light mode' : 'Dark mode'}>
+            {theme === 'dark' ? Ic.sun : Ic.moon}
+          </button>
+          <span className="ks-profile" title={`${user.username} · ${user.role.replaceAll('_', ' ')}`}>
+            <span className="ks-avatar" aria-hidden="true">{user.username.charAt(0).toUpperCase()}</span>
+            <span className="ks-profile-text">
+              <strong>{user.username}</strong>
+              <small>{user.role.replaceAll('_', ' ')}</small>
+            </span>
+          </span>
+          <button type="button" className="ks-btn ks-btn-ghost ks-btn-sm" onClick={signOut}>{Ic.signout} Sign out</button>
+        </header>
         <div className="ks-main-inner">
 
           {/* ---------------- Dashboard ---------------- */}
@@ -688,6 +743,16 @@ export default function AdminPortal() {
             </>
           )}
 
+          {form && serverSanity && (serverSanity.projectId !== SITE_SANITY.projectId || serverSanity.dataset !== SITE_SANITY.dataset) && (
+            <div className="ks-warn" role="alert">
+              <strong>The admin and the public site use different Sanity projects.</strong>
+              <span>
+                Saving here writes to <code>{serverSanity.projectId}/{serverSanity.dataset}</code>, but the site reads <code>{SITE_SANITY.projectId}/{SITE_SANITY.dataset}</code>, so changes and images will not appear on the site.
+                Set <code>SANITY_PROJECT_ID</code> and <code>VITE_SANITY_PROJECT_ID</code> to the same project.
+              </span>
+            </div>
+          )}
+
           {/* ---------------- Content: list ---------------- */}
           {form && !editing && (
             <>
@@ -699,7 +764,7 @@ export default function AdminPortal() {
                 </div>
               </div>
 
-              {busy && !documents.length ? <p className="admin-quiet">Loading…</p>
+              {busy && !documents.length ? <SkeletonTable columns={4} />
                 : visibleDocuments.length ? (
                   <div className="ks-table-wrap">
                     <table className="ks-table">
@@ -749,7 +814,7 @@ export default function AdminPortal() {
                   value={draft.publicationStatus || 'draft'}
                   stages={PUBLICATION_STAGES}
                   readOnly={readOnly}
-                  locked={canPublish(user.role) ? [] : ['published']}
+                  locked={canPublish(user.role, view) ? [] : ['published']}
                   lockedNote="You can take this to review. An organizer publishes it."
                   onChange={stage => updateDraft({ ...draft, publicationStatus: stage })}
                 />
@@ -763,7 +828,7 @@ export default function AdminPortal() {
                   {rawError && <p className="ks-raw-error">{rawError}</p>}
                 </div>
               ) : (
-                <DocumentForm form={form} document={draft} onChange={updateDraft} sources={{ events: eventIds }} readOnly={readOnly} />
+                <DocumentForm form={form} document={draft} onChange={updateDraft} sources={{ events: eventIds, uploadImage, fetchPreview }} readOnly={readOnly} />
               )}
 
               {!readOnly && dirty && (
@@ -846,11 +911,11 @@ export default function AdminPortal() {
                       <Field label="Repository" htmlFor="bip-repo" wide hint="Full https:// link to the code.">
                         <TextInput id="bip-repo" type="url" value={projectDraft.repositoryUrl} placeholder="https://github.com/organization/project" onChange={event => setProjectDraft({ ...projectDraft, repositoryUrl: event.target.value })} />
                       </Field>
-                      <Field label="Cover image" htmlFor="bip-image" wide hint="Google Drive image set to “anyone with the link can view”.">
-                        <TextInput id="bip-image" type="url" value={projectDraft.imageDriveUrl} placeholder="https://drive.google.com/file/d/…" onChange={event => setProjectDraft({ ...projectDraft, imageDriveUrl: event.target.value })} />
+                      <Field label="Cover image" htmlFor="bip-image" wide hint="Uploaded to Sanity. Shown on the project card and page.">
+                        <ImageField id="bip-image" mode="url" value={projectDraft.imageUrl} onUpload={uploadImage} onChange={next => setProjectDraft({ ...projectDraft, imageUrl: next })} />
                       </Field>
-                      <Field label="Owner avatar" htmlFor="bip-avatar" wide hint="Optional Google Drive image link.">
-                        <TextInput id="bip-avatar" type="url" value={projectDraft.authorAvatarUrl} placeholder="https://drive.google.com/file/d/…" onChange={event => setProjectDraft({ ...projectDraft, authorAvatarUrl: event.target.value })} />
+                      <Field label="Owner photo" htmlFor="bip-avatar" hint="Optional. A square photo works best.">
+                        <ImageField id="bip-avatar" mode="url" aspect="1 / 1" value={projectDraft.authorAvatarUrl} onUpload={uploadImage} onChange={next => setProjectDraft({ ...projectDraft, authorAvatarUrl: next })} />
                       </Field>
                     </div>
 
@@ -873,7 +938,12 @@ export default function AdminPortal() {
                             <tbody>
                               {visibleProjects.map(project => (
                                 <tr key={project.id} onClick={() => openProjectForm(project)}>
-                                  <td className="ks-cell-title">{project.title}</td>
+                                  <td className="ks-cell-title">
+                                    <span className="ks-thumbcell">
+                                      {imageUrl(project.imageUrl, 96) ? <img className="ks-thumb" src={imageUrl(project.imageUrl, 96)} alt="" /> : <span className="ks-thumb is-empty" />}
+                                      {project.title}
+                                    </span>
+                                  </td>
                                   <td><Pill tone={PROJECT_VISIBILITY.find(stage => stage.value === project.status)?.tone || 'off'}>{project.status}</Pill></td>
                                   <td className="ks-cell-muted">{project.category || '—'}</td>
                                   <td onClick={event => event.stopPropagation()} style={{ textAlign: 'right' }}>

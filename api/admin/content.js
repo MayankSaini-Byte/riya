@@ -1,26 +1,30 @@
 import { createClient } from '@sanity/client'
 import { randomUUID } from 'node:crypto'
 import { json, recordAudit, requireMethod, requireSession, requireSameOrigin, setSecurityHeaders } from '../../server/security.js'
+import { sanityConfig } from '../../server/sanity.js'
 
 const PERMISSIONS = {
   siteEvent: ['super_admin', 'event_organizer', 'read_only'],
   siteResult: ['super_admin', 'event_organizer', 'read_only'],
   siteAnnouncement: ['super_admin', 'content_editor', 'event_organizer', 'read_only'],
+  mind: ['super_admin', 'content_editor', 'event_organizer', 'read_only'],
 }
 
 const EDITORS = {
   siteEvent: ['super_admin', 'event_organizer'],
   siteResult: ['super_admin', 'event_organizer'],
   siteAnnouncement: ['super_admin', 'content_editor', 'event_organizer'],
+  mind: ['super_admin', 'content_editor'],
 }
 
 function canPublish(type, role) {
-  return role === 'super_admin' || (role === 'event_organizer' && ['siteEvent', 'siteResult', 'siteAnnouncement'].includes(type))
+  return role === 'super_admin'
+    || (role === 'event_organizer' && ['siteEvent', 'siteResult', 'siteAnnouncement'].includes(type))
+    || (role === 'content_editor' && type === 'mind')
 }
 
 function getClient() {
-  const projectId = process.env.SANITY_PROJECT_ID || '94wv2qdl'
-  const dataset = process.env.SANITY_DATASET || 'production'
+  const { projectId, dataset } = sanityConfig()
   const token = process.env.SANITY_API_WRITE_TOKEN
   if (!token) throw new Error('Sanity write access is not configured')
   return createClient({ projectId, dataset, token, apiVersion: '2025-01-01', useCdn: false, perspective: 'raw' })
@@ -49,7 +53,7 @@ export default async function handler(req, res) {
     const client = getClient()
     if (req.method === 'GET') {
       const docs = await client.fetch('*[_type == $type] | order(_updatedAt desc)[0...200]', { type })
-      return json(res, 200, { documents: docs })
+      return json(res, 200, { documents: docs, sanity: sanityConfig() })
     }
     if (!EDITORS[type].includes(user.role)) return json(res, 403, { error: 'Access denied' })
     if (!requireSameOrigin(req, res)) return

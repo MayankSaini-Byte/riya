@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
+import ArticlePreview from '../components/ArticlePreview'
 import MindViewer from '../components/MindViewer'
 import MindMinimap from '../components/MindMinimap'
 import PageTransition from '../components/PageTransition'
-import { client } from '../lib/sanity'
+import { fetchMind as loadMind } from '../lib/sanity'
 import { FiArrowLeft } from 'react-icons/fi'
 
 export default function MindDetail() {
@@ -15,8 +16,7 @@ export default function MindDetail() {
   useEffect(() => {
     async function fetchMind() {
       try {
-        const query = '*[_type == "mind" && slug.current == $slug && (!defined(publicationStatus) || publicationStatus == "published")][0]{ ..., "authorName": author->name }'
-        const fetchedMind = await client.fetch(query, { slug })
+        const fetchedMind = await loadMind(slug)
         setMind(fetchedMind)
       } catch (err) {
         console.error("Failed to fetch mind from Sanity:", err)
@@ -46,6 +46,8 @@ export default function MindDetail() {
             <div className="spinner" />
             <p>Loading Issue...</p>
           </div>
+        ) : mind?.articleUrl ? (
+          <ArticlePreview mind={mind} />
         ) : mind ? (
           <>
             <MindMinimap body={mind.body} />

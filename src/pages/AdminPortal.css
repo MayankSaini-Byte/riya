@@ -215,9 +215,22 @@
 .ks-brand-badge img { width: 100%; height: 100%; object-fit: cover; }
 .ks-brand-name { font-size: 0.95rem; font-weight: 650; letter-spacing: -0.01em; }
 
-.ks-theme { width: 32px; height: 32px; color: var(--text-2); }
 
-.ks-nav { margin-top: 22px; overflow-y: auto; display: grid; gap: 2px; align-content: start; }
+.ks-rail { overflow: hidden; }
+/* The nav is the scrolling region: min-height 0 lets a flex child shrink
+   below its content, which is what makes overflow-y actually scroll. */
+.ks-nav {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 22px -6px 0;
+  padding: 0 6px 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  display: grid;
+  gap: 2px;
+  align-content: start;
+}
 .ks-nav-group { margin-top: 18px; }
 .ks-nav-group:first-child { margin-top: 0; }
 .ks-nav-label {
@@ -264,11 +277,36 @@
   text-align: center;
 }
 
-.ks-whoami { margin-top: auto; padding: 14px 8px 0; border-top: 1px solid var(--border); display: grid; gap: 2px; }
-.ks-whoami-name { font-size: 0.82rem; font-weight: 600; overflow-wrap: anywhere; }
-.ks-whoami-role { color: var(--text-3); font-size: 0.72rem; text-transform: capitalize; }
-.ks-signout { justify-self: start; margin-top: 8px; padding: 0; border: 0; background: none; color: var(--text-3); font: inherit; font-size: 0.82rem; cursor: pointer; }
-.ks-signout:hover { color: var(--danger); }
+/* Top-right account bar */
+.ks-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 10px clamp(16px, 3vw, 32px);
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(10px);
+}
+.ks-profile { display: inline-flex; align-items: center; gap: 10px; min-width: 0; padding: 4px 12px 4px 4px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); }
+.ks-avatar {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+.ks-profile-text { display: grid; min-width: 0; line-height: 1.2; }
+.ks-profile-text strong { max-width: 220px; overflow: hidden; font-size: 0.82rem; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.ks-profile-text small { color: var(--text-3); font-size: 0.7rem; text-transform: capitalize; }
 
 .ks-main { min-width: 0; }
 .ks-main-inner { max-width: 1180px; margin: 0 auto; padding: clamp(22px, 3vw, 40px); }
@@ -713,6 +751,126 @@
 .ks-log-target { color: var(--text-2); font-family: var(--mono); font-size: 0.74rem; overflow-wrap: anywhere; }
 .ks-log-row time { color: var(--text-3); font-size: 0.74rem; text-align: right; }
 
+/* --- Image upload ------------------------------------------------------ */
+
+.aimage { display: grid; gap: 9px; }
+.aimage-drop {
+  position: relative;
+  width: 100%;
+  max-width: 560px;
+  overflow: hidden;
+  border: 1px dashed var(--border-2);
+  border-radius: var(--r);
+  background: var(--sunken);
+  transition: border-color 0.14s ease, background 0.14s ease;
+}
+.aimage-drop.has-image { border-style: solid; border-color: var(--border); }
+.aimage-drop.is-drag { border-color: var(--text); background: var(--hover); }
+.aimage-drop img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.aimage-empty {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 100%;
+  padding: 18px;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+}
+.aimage-empty span { font-size: 0.86rem; font-weight: 550; color: var(--text); }
+.aimage-empty small { color: var(--text-3); font-size: 0.75rem; }
+.aimage-empty:hover { background: var(--hover); }
+.aimage-empty:disabled { cursor: progress; }
+.aimage-busy {
+  position: absolute;
+  inset: auto 10px 10px auto;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  font-size: 0.75rem;
+}
+.aimage-actions { display: flex; gap: 8px; }
+.aimage-btn {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--r);
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.aimage-btn:hover:not(:disabled) { background: var(--hover); }
+.aimage-btn.is-danger { color: var(--danger); }
+.aimage-error { margin: 0; color: var(--danger); font-size: 0.8rem; }
+
+/* --- Article link ------------------------------------------------------ */
+
+.alink { display: grid; gap: 8px; }
+.alink-row { display: flex; gap: 8px; }
+.alink-row .actrl { flex: 1; }
+.alink-fetch {
+  flex-shrink: 0;
+  height: 42px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--r);
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 550;
+  cursor: pointer;
+}
+.alink-fetch:disabled { opacity: 0.45; cursor: not-allowed; }
+.alink-msg { margin: 0; font-size: 0.8rem; }
+.alink-msg.is-ok { color: var(--ok); }
+.alink-msg.is-warn { color: var(--warn); }
+.alink-msg.is-error { color: var(--danger); }
+
+/* --- Configuration warning -------------------------------------------- */
+
+.ks-warn {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 22px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--r);
+  background: color-mix(in srgb, var(--warn) 9%, transparent);
+  font-size: 0.86rem;
+  line-height: 1.55;
+}
+.ks-warn strong { color: var(--text); }
+.ks-warn span { color: var(--text-2); }
+.ks-warn code { font-family: var(--mono); font-size: 0.8rem; color: var(--text); }
+
+/* --- Counts, skeletons, thumbnails ------------------------------------- */
+
+.ks-nav-count { color: var(--text-3); font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+
+.ks-skel {
+  display: block;
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--sunken) 25%, var(--hover) 50%, var(--sunken) 75%);
+  background-size: 200% 100%;
+  animation: ks-shimmer 1.2s ease-in-out infinite;
+}
+@keyframes ks-shimmer { to { background-position: -200% 0; } }
+
+.ks-thumbcell { display: inline-flex; align-items: center; gap: 12px; }
+.ks-thumb { width: 40px; height: 28px; flex-shrink: 0; border-radius: 6px; object-fit: cover; background: var(--sunken); }
+.ks-thumb.is-empty { display: inline-block; border: 1px dashed var(--border-2); }
+
 /* --- Focus + motion + responsive --------------------------------------- */
 
 .admin-shell :focus-visible,
@@ -724,8 +882,17 @@
 
 @media (max-width: 880px) {
   .admin-shell { grid-template-columns: 1fr; }
-  .ks-rail { position: static; height: auto; flex-direction: column; }
-  .ks-nav { grid-auto-flow: row; }
+  /* On phones the sidebar becomes a slim bar with a sideways-scrolling menu. */
+  .ks-rail { position: static; height: auto; flex-direction: row; align-items: center; gap: 14px; padding: 10px 14px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .ks-rail-top { flex-shrink: 0; padding: 0; }
+  .ks-brand-name { display: none; }
+  .ks-nav { display: flex; gap: 4px; margin: 0; padding: 2px 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+  .ks-nav::-webkit-scrollbar { display: none; }
+  .ks-nav-group, .ks-nav-group:first-child { display: flex; gap: 4px; margin: 0; }
+  .ks-nav-label, .ks-nav-count { display: none; }
+  .ks-nav-item { width: auto; white-space: nowrap; }
+  .ks-profile-text { display: none; }
+  .ks-profile { padding: 4px; }
   .ks-table-wrap { overflow-x: auto; }
   .ks-log-row { grid-template-columns: 1fr 1fr; }
   .ks-log-row time { text-align: left; }

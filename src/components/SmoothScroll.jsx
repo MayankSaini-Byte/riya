@@ -4,8 +4,11 @@ import 'lenis/dist/lenis.css'
 import gsap from '../lib/gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
 
-export default function SmoothScroll({ children }) {
+// `disabled` keeps native scrolling, e.g. in the admin portal, where Lenis
+// would swallow wheel events meant for the sidebar, menus and text areas.
+export default function SmoothScroll({ children, disabled = false }) {
   useEffect(() => {
+    if (disabled) return undefined
     // Initialize Lenis
     const lenis = new Lenis({
       duration: 1.6,
@@ -22,17 +25,17 @@ export default function SmoothScroll({ children }) {
     // Integrate Lenis with GSAP ScrollTrigger
     lenis.on('scroll', ScrollTrigger.update)
 
-    gsap.ticker.add((time) => {
-      lenis.raf(time * 1000)
-    })
+    // Keep a reference: the ticker can only remove the exact function it was given.
+    const tick = (time) => lenis.raf(time * 1000)
+    gsap.ticker.add(tick)
 
     gsap.ticker.lagSmoothing(0)
 
     return () => {
+      gsap.ticker.remove(tick)
       lenis.destroy()
-      gsap.ticker.remove(lenis.raf)
     }
-  }, [])
+  }, [disabled])
 
   return <>{children}</>
 }

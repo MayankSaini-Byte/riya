@@ -1,18 +1,35 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { useReducedMotion } from 'framer-motion'
 import PageTransition from '../components/PageTransition'
 import JoinDrawer from '../components/JoinDrawer'
+import JoiningSteps from '../components/JoiningSteps'
+import ProjectCover from '../components/ProjectCover'
 import {
-  categoryOf, driveImageSource, fetchProjects, formatDate, initials, safeExternalUrl,
+  buildingLabel, categoryOf, coverTint, fetchProjects, formatDate, initials, projectImageSource, safeExternalUrl,
 } from '../lib/buildInPublic'
 import './BuildInPublic.css'
+import './BuildInPublicHome.css'
+
+function BackLink() {
+  return (
+    <Link className="bp-back cursor-target" to="/build-in-public">
+      <svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M12 5l-5 5 5 5" /></svg>
+      All projects
+    </Link>
+  )
+}
 
 export default function BuildInPublicProject() {
   const { projectId } = useParams()
   const [project, setProject] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [joinOpen, setJoinOpen] = useState(false)
+  const [searchParams] = useSearchParams()
+  // ?join=1 opens the request drawer straight away (used by the landing page).
+  const [joinOpen, setJoinOpen] = useState(() => searchParams.get('join') === '1')
+  const [current, setCurrent] = useState('needs')
+  const reduceMotion = useReducedMotion()
 
   useEffect(() => {
     let active = true
@@ -28,128 +45,125 @@ export default function BuildInPublicProject() {
     return () => { active = false }
   }, [projectId])
 
+  const sections = project ? [
+    { id: 'needs', label: 'What it needs', show: Boolean(project.guidelines) },
+    { id: 'skills', label: 'Skills', show: project.tags?.length > 0 },
+    { id: 'joining', label: 'How joining works', show: true },
+  ].filter(section => section.show) : []
+
+  // Highlight the section being read in the "On this page" index.
+  useEffect(() => {
+    if (!project) return undefined
+    const observer = new IntersectionObserver(entries => {
+      const visible = entries.filter(entry => entry.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)
+      if (visible[0]) setCurrent(visible[0].target.id)
+    }, { rootMargin: '-20% 0px -60% 0px' })
+    for (const id of ['needs', 'skills', 'joining']) {
+      const element = window.document.getElementById(id)
+      if (element) observer.observe(element)
+    }
+    return () => observer.disconnect()
+  }, [project])
+
   if (loading) {
     return (
-      <PageTransition className="bip bip-detail">
-        <>
-          <div className="bip-skeleton bip-skeleton-tall" aria-label="Loading project" />
-        </>
+      <PageTransition className="bp bp-detail">
+        <div className="bp-wrap"><div className="bp-hero bp-hero-loading" aria-busy="true" aria-label="Loading project" /></div>
       </PageTransition>
     )
   }
 
   if (error || !project) {
     return (
-      <PageTransition className="bip bip-detail">
-        <>
-          <Link className="bip-back" to="/build-in-public">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
-            All projects
-          </Link>
-          <p className="bip-state bip-state-error" role="alert">{error || 'Project not found.'}</p>
-        </>
+      <PageTransition className="bp bp-detail">
+        <div className="bp-wrap">
+          <BackLink />
+          <p className="bp-error" role="alert">{error || 'Project not found.'}</p>
+        </div>
       </PageTransition>
     )
   }
 
-  const cover = driveImageSource(project.imageDriveUrl)
-  const avatar = driveImageSource(project.authorAvatarUrl)
+  const avatar = projectImageSource(project.authorAvatarUrl, 120)
   const repository = safeExternalUrl(project.repositoryUrl)
   const track = categoryOf(project)
 
-  return (
-    <PageTransition className="bip bip-detail">
-      <>
-        <Link className="bip-back" to="/build-in-public">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
-          All projects
-        </Link>
+  function goTo(id) {
+    window.document.getElementById(id)?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' })
+  }
 
-        <header className="bip-detail-head">
-          <div className="bip-detail-intro">
-            <div className="bip-detail-byline">
-              <span className="bm-avatar" aria-hidden="true">
-                {avatar ? <img src={avatar} alt="" /> : initials(project.authorName)}
-              </span>
-              <span>
-                <strong>{project.authorName || 'Binary Minds'}</strong>
-                {project.authorRole && <small>{project.authorRole}</small>}
-              </span>
-            </div>
-            <h1>{project.title}</h1>
-            <p className="bip-detail-lede">{project.summary}</p>
-            <div className="bip-detail-actions">
-              <button type="button" className="bm-btn bm-btn-primary" onClick={() => setJoinOpen(true)}>
-                Join this project
-              </button>
+  return (
+    <PageTransition className="bp bp-detail">
+      <div className="bp-wrap">
+        <BackLink />
+
+        <section className="bp-hero bp-detail-hero" style={{ '--tint': coverTint(project) }}>
+          {project.cover?.lqip && <span className="bp-wash" style={{ backgroundImage: `url(${project.cover.lqip})` }} aria-hidden="true" />}
+          <div className="bp-hero-text">
+            <p className="bp-tag">{[track, project.difficulty].filter(Boolean).join(' · ') || 'Project'}</p>
+            <h1 className="bp-hero-title">{project.title}</h1>
+            {project.summary && <p className="bp-hero-summary">{project.summary}</p>}
+            <div className="bp-hero-actions">
+              <button type="button" className="bp-btn bp-btn-light bp-btn-lg cursor-target" onClick={() => setJoinOpen(true)}>Request to join</button>
               {repository && (
-                <a className="bm-btn bm-btn-ghost" href={repository} target="_blank" rel="noopener noreferrer">
-                  View repository
-                </a>
+                <a className="bp-btn bp-btn-glass bp-btn-lg cursor-target" href={repository} target="_blank" rel="noopener noreferrer">View repository</a>
               )}
             </div>
+            <div className="bp-owner">
+              <span className="bp-avatar">{avatar ? <img src={avatar} alt="" /> : initials(project.authorName || 'Binary Minds')}</span>
+              <span>
+                <strong>{project.authorName || 'Binary Minds'}</strong>
+                <small>{[project.authorRole, buildingLabel(project.contributors)].filter(Boolean).join(' · ')}</small>
+              </span>
+            </div>
           </div>
+          <div className="bp-hero-media"><ProjectCover project={project} width={1600} /></div>
+        </section>
 
-          <div className="bip-detail-cover" aria-hidden="true">
-            {cover
-              ? <img src={cover} alt="" />
-              : <span className="bip-card-mark">{initials(project.title)}</span>}
-          </div>
-        </header>
-
-        <dl className="bip-meta">
-          <div>
-            <dt>Difficulty</dt>
-            <dd>
-              {project.difficulty
-                ? <span className={`bm-level bm-level-${project.difficulty.toLowerCase()}`}>{project.difficulty}</span>
-                : '—'}
-            </dd>
-          </div>
-          <div>
-            <dt>Track</dt>
-            <dd>{track}</dd>
-          </div>
-          <div>
-            <dt>Opened</dt>
-            <dd>{formatDate(project.createdAt)}</dd>
-          </div>
-          <div>
-            <dt>Status</dt>
-            <dd className="bip-meta-open">Open for contributors</dd>
-          </div>
-        </dl>
-
-        <div className="bip-detail-body">
-          <article>
-            <h2>About this project</h2>
-            <p>{project.summary}</p>
-
-            <h2>What this project needs</h2>
-            <p className="bip-prewrap">{project.guidelines}</p>
-          </article>
-
-          <aside className="bip-detail-side">
-            {project.tags?.length > 0 && (
-              <section>
-                <h2>Skills we are looking for</h2>
-                <div className="bm-tags">
-                  {project.tags.map(tag => <span key={tag}>{tag}</span>)}
-                </div>
+        <div className="bp-detail-body">
+          <article className="bp-detail-main">
+            {project.guidelines && (
+              <section id="needs" className="bp-block" aria-labelledby="needs-title">
+                <h2 id="needs-title">What it needs</h2>
+                <p className="bp-prose">{project.guidelines}</p>
               </section>
             )}
-            <section className="bip-detail-cta">
-              <h2>Ready to build?</h2>
-              <p>Send a short request. A maintainer replies to the student email you give.</p>
-              <button type="button" className="bm-btn bm-btn-primary" onClick={() => setJoinOpen(true)}>
-                Join this project
-              </button>
-            </section>
+            {project.tags?.length > 0 && (
+              <section id="skills" className="bp-block" aria-labelledby="skills-title">
+                <h2 id="skills-title">Skills</h2>
+                <ul className="bp-tags">{project.tags.map(tag => <li key={tag}>{tag}</li>)}</ul>
+              </section>
+            )}
+            <div id="joining" className="bp-block"><JoiningSteps /></div>
+          </article>
+
+          <aside className="bp-detail-side" aria-label="About this project">
+            <div className="bp-side-sticky">
+              <button type="button" className="bp-btn bp-btn-light bp-side-join cursor-target" onClick={() => setJoinOpen(true)}>Request to join</button>
+
+              <dl className="bp-facts-list">
+                <div><dt>Track</dt><dd>{track}</dd></div>
+                <div><dt>Level</dt><dd>{project.difficulty || 'Any'}</dd></div>
+                {project.createdAt && <div><dt>Opened</dt><dd>{formatDate(project.createdAt)}</dd></div>}
+                <div><dt>Contributors</dt><dd>{buildingLabel(project.contributors)}</dd></div>
+              </dl>
+
+              {sections.length > 1 && (
+                <nav className="bp-toc" aria-label="On this page">
+                  <p>On this page</p>
+                  {sections.map(section => (
+                    <button key={section.id} type="button" aria-current={current === section.id ? 'true' : undefined} onClick={() => goTo(section.id)}>
+                      {section.label}
+                    </button>
+                  ))}
+                </nav>
+              )}
+            </div>
           </aside>
         </div>
-      </>
+      </div>
 
-      {joinOpen && <JoinDrawer project={project} onClose={() => setJoinOpen(false)} />}
+      {joinOpen && project && <JoinDrawer project={project} onClose={() => setJoinOpen(false)} />}
     </PageTransition>
   )
 }

@@ -11,7 +11,6 @@
 import { readFileSync } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 
 // Minimal .env reader that keeps values literal. We cannot use Vite's loadEnv
 // here: it runs dotenv's variable expansion, which eats the "$" in scrypt
@@ -66,6 +65,14 @@ export function localApi() {
       for (const [key, value] of Object.entries(merged)) {
         if (process.env[key] === undefined) process.env[key] = value
       }
+
+      // The admin writes through the server's project; the public pages read
+      // the VITE_ project. If they differ, nothing saved shows up on the site.
+      const serverProject = process.env.SANITY_PROJECT_ID || process.env.SANITY_API_PROJECT_ID || 'pirhl038'
+      const siteProject = process.env.VITE_SANITY_PROJECT_ID || 'pirhl038'
+      if (serverProject !== siteProject) {
+        console.warn(`\n\x1b[33m⚠  Sanity mismatch: the admin writes to project "${serverProject}" but the site reads "${siteProject}".\n   Set SANITY_PROJECT_ID and VITE_SANITY_PROJECT_ID to the same project in .env.\x1b[0m\n`)
+      }
     },
 
     configureServer(server) {
@@ -105,8 +112,10 @@ export function localApi() {
           }
           res.send = body => res.end(body)
 
-          // Re-import each time so edits to api/ files take effect without a restart.
-          const module = await import(`${pathToFileURL(file).href}?t=${Date.now()}`)
+          // Load through Vite's SSR module graph rather than a bare import(): it
+          // invalidates a route *and its dependencies* (server/*.js) when files
+          // change, so a git pull or edit never leaves a stale copy in memory.
+          const module = await server.ssrLoadModule(file)
           if (typeof module.default !== 'function') {
             return sendJson(500, { error: `/api/${route} has no default export handler` })
           }

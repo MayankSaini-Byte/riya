@@ -6,13 +6,13 @@
 
 | Data | Canonical source | Update path | Status |
 |---|---|---|---|
-| Minds/articles | Sanity `mind` documents | Sanity Studio | Sanity remains canonical; removed from this portal |
+| Minds/articles | Sanity `mind` documents | Portal (link-only) and Sanity Studio | New Minds store an external article link (Medium/Substack) plus a preview: title, excerpt, author, date and a cover image copied into Sanity. The site shows the preview and links out, because Medium and Substack block embedding. Existing rich-text Minds still render with the full reader. |
 | Legacy Blitz challenges/questions | Existing Sanity `challenge` documents | No public route or portal editing | Records retained; feature retired from the current site |
 | Events | Published Sanity `siteEvent` records | Portal; public event page reads published projection | Implemented; legacy local fallback remains until at least one managed record exists |
 | Problem statements/resources | `problemStatements` and details on `siteEvent` | Portal event JSON | Implemented for managed events; legacy JSON fallback remains |
 | Results | Published Sanity `siteResult` records | Portal; public view only shows published records | Implemented; placeholder local results hidden |
 | Announcements | Published Sanity `siteAnnouncement` records | Portal; public banner | Implemented |
-| Build in Public projects | Upstash Redis project records | Super Admin project editor; public page reads published projects | Public title, summary, tags, guidelines, repository link, and optional Drive image link; draft and archived records are private |
+| Build in Public projects | Upstash Redis project records; images in the Sanity asset store | Super Admin project editor; public page reads published projects | Records stay in Redis so drafts remain private (the Sanity dataset is publicly readable). Cover and owner images are uploaded to Sanity and only Sanity CDN URLs are accepted; older Drive links still display. |
 | Build in Public contribution requests | Upstash Redis records and optional PDF/Word attachment chunks | Public application form; Super Admin review | Private application data; admin can accept, reject, or delete; deleting a request removes its attachment keys too. The request list is capped at 500 records. |
 | Ideathon submissions | External Google Apps Script endpoint | External system | Needs external access; separate from Build in Public |
 | Branding/social links | Defaults and public Vite build variables | Source/deployment config | Verified |

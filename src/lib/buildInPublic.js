@@ -61,18 +61,15 @@ const DEV_SAMPLE_PROJECTS = [
   },
 ]
 
+// Samples are shown only when there is no API at all (a bare `vite` without the
+// local API plugin answers 404). A real API error is surfaced instead of being
+// hidden behind fake projects, and an empty list stays empty.
 export async function fetchProjects() {
-  try {
-    const response = await fetch('/api/public/build-in-public')
-    const result = await response.json().catch(() => ({}))
-    if (!response.ok) throw new Error(result.error || 'Projects are temporarily unavailable.')
-    const list = Array.isArray(result.projects) ? result.projects : []
-    if (!list.length && import.meta.env.DEV) return DEV_SAMPLE_PROJECTS
-    return list
-  } catch (error) {
-    if (import.meta.env.DEV) return DEV_SAMPLE_PROJECTS
-    throw error
-  }
+  const response = await fetch('/api/public/build-in-public')
+  if (response.status === 404 && import.meta.env.DEV) return DEV_SAMPLE_PROJECTS
+  const result = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(result.error || 'Projects are temporarily unavailable.')
+  return Array.isArray(result.projects) ? result.projects : []
 }
 
 export async function postJson(path, body) {
@@ -111,6 +108,24 @@ export function driveImageSource(shareUrl) {
   }
 }
 
+/** Project images are uploaded to the Sanity image CDN; ask it for a sized,
+ *  modern-format copy. Older records may still hold a Google Drive link. */
+export function projectImageSource(url, width = 1200) {
+  if (!url) return ''
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol === 'https:' && parsed.hostname === 'cdn.sanity.io') {
+      parsed.searchParams.set('w', String(width))
+      parsed.searchParams.set('auto', 'format')
+      parsed.searchParams.set('fit', 'max')
+      return parsed.toString()
+    }
+  } catch {
+    return ''
+  }
+  return driveImageSource(url)
+}
+
 /** Repository links are rendered only when they are http(s), so a stored
  *  `javascript:` or `data:` value can never become a live link. */
 export function safeExternalUrl(value) {
@@ -121,6 +136,18 @@ export function safeExternalUrl(value) {
   } catch {
     return ''
   }
+}
+
+// A count of accepted contributors; who they are is never public.
+// A project's own colour, taken from its cover image (Sanity's palette). Earthy
+// muted tints like NextWork's cards; projects without a cover share a warm clay.
+export function coverTint(project) {
+  const tint = project?.cover?.dark || project?.cover?.dominant
+  return tint && /^#[0-9a-f]{6}$/i.test(tint) ? tint : '#3b352e'
+}
+
+export function buildingLabel(count) {
+  return count ? `${count} building` : 'Open to join'
 }
 
 export function categoryOf(project) {

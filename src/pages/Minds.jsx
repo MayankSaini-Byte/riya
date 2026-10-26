@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import MindCard from '../components/MindCard'
 import PageTransition from '../components/PageTransition'
-import { client } from '../lib/sanity'
+import { fetchMinds as loadMinds } from '../lib/sanity'
 import { InteractiveGridPattern } from '../components/InteractiveGridPattern'
 
 export default function Minds() {
@@ -13,12 +13,7 @@ export default function Minds() {
   useEffect(() => {
     async function fetchMinds() {
       try {
-        const query = `*[_type == "mind" && (!defined(publicationStatus) || publicationStatus == "published")] | order(publishedAt desc) {
-          _id, title, slug, publishedAt, mainImage,
-          "authorName": author->name,
-          "categories": categories[]->title
-        }`
-        const fetchedMinds = await client.fetch(query)
+        const fetchedMinds = await loadMinds()
         setMinds(fetchedMinds)
       } catch (err) {
         console.error("Failed to fetch minds from Sanity:", err)

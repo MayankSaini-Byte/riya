@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { imageUrl } from './media'
 
 // Shared controls for the admin portal. Each one does a single job and states the
 // consequence of using it, so an organizer never has to guess what a field accepts.
@@ -432,6 +433,104 @@ export function Empty({ title, children, action }) {
       <h2>{title}</h2>
       {children && <p>{children}</p>}
       {action}
+    </div>
+  )
+}
+
+// Image upload with a live preview. Click or drop a file; it is resized in the
+// browser, uploaded to Sanity, and stored either as a Sanity image reference
+// (mode "asset", for Sanity documents) or as its CDN URL (mode "url").
+export function ImageField({ value, mode = 'asset', onChange, onUpload, disabled, id, aspect = '16 / 9' }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [dragging, setDragging] = useState(false)
+  const input = useRef(null)
+  const preview = imageUrl(value, 720)
+
+  async function take(file) {
+    if (!file || disabled) return
+    setBusy(true)
+    setError('')
+    try {
+      const image = await onUpload(file)
+      onChange(mode === 'url' ? image.url : { _type: 'image', asset: { _type: 'reference', _ref: image.assetId } })
+    } catch (reason) {
+      setError(reason.message)
+    } finally {
+      setBusy(false)
+      if (input.current) input.current.value = ''
+    }
+  }
+
+  return (
+    <div className="aimage">
+      <div
+        className={`aimage-drop${dragging ? ' is-drag' : ''}${preview ? ' has-image' : ''}`}
+        style={{ aspectRatio: aspect }}
+        onDragOver={event => { event.preventDefault(); if (!disabled) setDragging(true) }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={event => { event.preventDefault(); setDragging(false); take(event.dataTransfer.files?.[0]) }}
+      >
+        {preview ? <img src={preview} alt="" /> : (
+          <button type="button" className="aimage-empty" disabled={disabled || busy} onClick={() => input.current?.click()}>
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5" /><circle cx="9" cy="10" r="1.8" /><path d="M21 16l-5.5-5.5L5 21" strokeLinejoin="round" /></svg>
+            <span>{busy ? 'Uploading…' : 'Drop an image or click to upload'}</span>
+            <small>JPEG, PNG, WebP or GIF · stored in Sanity</small>
+          </button>
+        )}
+        {busy && preview && <span className="aimage-busy">Uploading…</span>}
+      </div>
+      <input ref={input} id={id} type="file" accept="image/*" hidden onChange={event => take(event.target.files?.[0])} />
+      {preview && !disabled && (
+        <div className="aimage-actions">
+          <button type="button" className="aimage-btn" disabled={busy} onClick={() => input.current?.click()}>Replace</button>
+          <button type="button" className="aimage-btn is-danger" disabled={busy} onClick={() => onChange(mode === 'url' ? '' : null)}>Remove</button>
+        </div>
+      )}
+      {error && <p className="aimage-error" role="alert">{error}</p>}
+    </div>
+  )
+}
+
+// An article URL with a button that fills the rest of the form from the
+// article itself. The parent decides which fields the fetched preview fills.
+export function ArticleLink({ value, onChange, onFetch, disabled, id, placeholder }) {
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState({ tone: '', text: '' })
+
+  async function run() {
+    if (!value || busy) return
+    setBusy(true)
+    setMessage({ tone: '', text: '' })
+    try {
+      const note = await onFetch(value)
+      setMessage(note ? { tone: 'warn', text: note } : { tone: 'ok', text: 'Filled in from the article.' })
+    } catch (reason) {
+      setMessage({ tone: 'error', text: reason.message })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="alink">
+      <div className="alink-row">
+        <input
+          id={id}
+          className="actrl"
+          type="url"
+          inputMode="url"
+          value={value || ''}
+          placeholder={placeholder}
+          disabled={disabled}
+          onChange={event => onChange(event.target.value)}
+          onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); run() } }}
+        />
+        <button type="button" className="alink-fetch" disabled={disabled || busy || !value} onClick={run}>
+          {busy ? 'Fetching…' : 'Fetch details'}
+        </button>
+      </div>
+      {message.text && <p className={`alink-msg is-${message.tone}`} role="status">{message.text}</p>}
     </div>
   )
 }

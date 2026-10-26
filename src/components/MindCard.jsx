@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 import { urlFor } from '../lib/sanity'
 
 export default function MindCard({ mind }) {
-  const { title, slug, publishedAt, mainImage, authorName, categories } = mind
+  const { title, slug, publishedAt, mainImage, authorName, categories, articleUrl, siteName } = mind
   const date = publishedAt
     ? new Date(publishedAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
     : 'Draft'
@@ -35,7 +35,7 @@ export default function MindCard({ mind }) {
           </div>
         )}
         <div className="mind-card-read">
-          Read Mind <span className="mind-card-arrow">→</span>
+          {articleUrl ? `Read on ${siteName || 'the web'}` : 'Read Mind'} <span className="mind-card-arrow">→</span>
         </div>
       </div>
     </Link>

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import {
+  ArticleLink, ImageField,
   Chips, Combo, Confirm, Counter, Field, RankPicker, Section, Segmented, Switch, TextArea, TextInput,
 } from './fields'
 import { fromLocalInput, getPath, setPath, slugify, toLocalInput } from './schema'
@@ -9,6 +10,34 @@ import { fromLocalInput, getPath, setPath, slugify, toLocalInput } from './schem
 
 function Control({ field, value, document, onField, sources, readOnly, id }) {
   const common = { id, disabled: readOnly }
+
+  // `sources` also carries the upload and preview services from the portal.
+  if (field.type === 'image') {
+    return <ImageField id={id} value={value} mode={field.mode} disabled={readOnly} onUpload={sources?.uploadImage} onChange={next => onField(field.key, next)} />
+  }
+
+  if (field.type === 'articleLink') {
+    return (
+      <ArticleLink
+        id={id}
+        value={value}
+        placeholder={field.placeholder}
+        disabled={readOnly}
+        onChange={next => onField(field.key, next)}
+        onFetch={async url => {
+          const { preview, note } = await sources.fetchPreview(url)
+          const extra = {}
+          for (const key of ['title', 'excerpt', 'siteName', 'authorName', 'publishedAt']) {
+            if (preview[key]) extra[key] = preview[key]
+          }
+          if (preview.image) extra.mainImage = { _type: 'image', asset: { _type: 'reference', _ref: preview.image.assetId } }
+          if (!document.slug?.current && preview.title) extra.slug = { _type: 'slug', current: slugify(preview.title) }
+          onField(field.key, preview.articleUrl || url, extra)
+          return note
+        }}
+      />
+    )
+  }
 
   if (field.type === 'segmented') {
     return <Segmented name={field.label} value={value || ''} options={field.options} disabled={readOnly} onChange={next => onField(field.key, next)} />
@@ -111,7 +140,7 @@ function FieldRow({ field, document, value, onField, sources, readOnly, idPrefix
       </div>
     )
   }
-  const wide = ['textarea', 'lines', 'chips', 'rank'].includes(field.type) || field.key === 'slug.current'
+  const wide = ['textarea', 'lines', 'chips', 'rank', 'image', 'articleLink'].includes(field.type) || field.key === 'slug.current'
   return (
     <Field label={field.label} hint={field.hint} required={field.required} htmlFor={id} wide={wide}>
       <Control field={field} value={value} document={document} onField={onField} sources={sources} readOnly={readOnly} id={id} />

@@ -1,5 +1,6 @@
 import { createProjectId, getBuildInPublicProjects, PROJECTS_KEY } from '../../server/build-in-public-projects.js'
 import { json, recordAudit, requireSameOrigin, requireSession, setSecurityHeaders, writeStoredJson } from '../../server/security.js'
+import { isSanityImageUrl } from '../../server/sanity.js'
 
 const STATUSES = new Set(['draft', 'published', 'archived'])
 const DIFFICULTIES = new Set(['Beginner', 'Intermediate', 'Advanced'])
@@ -22,18 +23,17 @@ function safeHttpsUrl(value, label) {
   return parsed.toString()
 }
 
-function driveImageUrl(value) {
-  const url = safeHttpsUrl(value, 'Google Drive image')
-  if (!url) return ''
-  const parsed = new URL(url)
-  const id = parsed.hostname === 'drive.google.com'
-    ? parsed.pathname.match(/^\/file\/d\/([\w-]+)/)?.[1] || parsed.searchParams.get('id')
-    : null
-  if (!id || !/^[\w-]{10,}$/.test(id)) throw new Error('Use a share link for an image stored in Google Drive.')
-  return `https://drive.google.com/file/d/${id}/view`
+// Images are uploaded through the admin into Sanity, so only this project's
+// Sanity CDN URLs are accepted. A value that is already stored on the record is
+// kept as-is, so older records still save without re-uploading.
+function sanityImage(value, label, previous = '') {
+  const input = cleanText(value, 600)
+  if (!input) return ''
+  if (input === previous || isSanityImageUrl(input)) return input
+  throw new Error(`Upload the ${label} through the admin so it is stored in Sanity.`)
 }
 
-function projectFields(body) {
+function projectFields(body, existing = {}) {
   const title = cleanText(body.title, 140)
   const summary = cleanText(body.summary, 1200)
   const guidelines = cleanText(body.guidelines, 1200)
@@ -51,9 +51,9 @@ function projectFields(body) {
   const authorName = cleanText(body.authorName, 80)
   const authorRole = cleanText(body.authorRole, 80)
   const repositoryUrl = safeHttpsUrl(body.repositoryUrl, 'repository')
-  const imageDriveUrl = driveImageUrl(body.imageDriveUrl)
-  const authorAvatarUrl = driveImageUrl(body.authorAvatarUrl)
-  return { title, summary, guidelines, tags, category, difficulty, authorName, authorRole, repositoryUrl, imageDriveUrl, authorAvatarUrl, status }
+  const imageUrl = sanityImage(body.imageUrl, 'cover image', existing.imageUrl)
+  const authorAvatarUrl = sanityImage(body.authorAvatarUrl, 'owner photo', existing.authorAvatarUrl)
+  return { title, summary, guidelines, tags, category, difficulty, authorName, authorRole, repositoryUrl, imageUrl, authorAvatarUrl, status }
 }
 
 export default async function handler(req, res) {
@@ -83,7 +83,7 @@ export default async function handler(req, res) {
     const index = projects.findIndex(project => project.id === id)
     if (index < 0) return json(res, 404, { error: 'Project not found.' })
     if (req.method === 'PUT') {
-      const fields = projectFields(body)
+      const fields = projectFields(body, projects[index])
       projects[index] = { ...projects[index], ...fields, updatedAt: new Date().toISOString() }
       await writeStoredJson(PROJECTS_KEY, projects)
       await recordAudit({ actor: actor.username, role: actor.role, action: 'build_in_public.project.updated', contentType: 'buildInPublicProject', documentId: id })
@@ -95,7 +95,7 @@ export default async function handler(req, res) {
     await recordAudit({ actor: actor.username, role: actor.role, action: 'build_in_public.project.deleted', contentType: 'buildInPublicProject', documentId: id })
     return json(res, 200, { project: removed, projects })
   } catch (error) {
-    if (error.message.startsWith('Add a title') || error.message.startsWith('Choose draft') || error.message.startsWith('Enter a valid HTTPS') || error.message.startsWith('Use a share link')) {
+    if (error.message.startsWith('Add a title') || error.message.startsWith('Choose draft') || error.message.startsWith('Enter a valid HTTPS') || error.message.startsWith('Upload the')) {
       return json(res, 400, { error: error.message })
     }
     return json(res, 503, { error: 'Build in Public projects are temporarily unavailable.' })

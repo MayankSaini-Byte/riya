@@ -54,6 +54,10 @@ export const ADMIN_ROLES = [
   { value: 'super_admin', label: 'Super Admin', note: 'Full access to the whole portal, like you.' },
 ]
 
+export const MIND_TOPICS = ['AI', 'Machine Learning', 'Web', 'Systems', 'Data', 'Career', 'Research', 'Tutorial']
+
+export const MIND_SOURCES = ['Medium', 'Substack', 'Dev.to', 'Hashnode', 'Personal blog']
+
 const LINK_HINT = 'Full https:// link.'
 
 // A group renders as one collapsible section. `open: true` groups start expanded so
@@ -86,7 +90,7 @@ export const FORMS = {
         fields: [
           { key: 'registrationLink', label: 'Registration link', type: 'url', hint: LINK_HINT },
           { key: 'ruleBookLink', label: 'Rule book link', type: 'url', hint: LINK_HINT },
-          { key: 'image', label: 'Cover image', type: 'text', hint: 'A file in /public such as /Ideathone.jpeg, or a full image link.' },
+          { key: 'image', label: 'Cover image', type: 'image', mode: 'asset', hint: 'Uploaded to Sanity. Shown on the event card and page.' },
           { key: 'footerText', label: 'Footer note', type: 'textarea', rows: 2, max: 240, placeholder: 'Event concluded. Thanks for participating.' },
         ],
       },
@@ -203,12 +207,45 @@ export const FORMS = {
       },
     ],
   },
+
+  // A Mind is an article published elsewhere. We keep the link plus a preview
+  // (title, excerpt, cover); the site shows the preview and links out, because
+  // Medium and Substack do not allow their articles to be embedded.
+  mind: {
+    label: 'Mind',
+    plural: 'Minds',
+    blurb: 'Minds are articles written on Medium or Substack. Paste the link and the preview fills itself in.',
+    groups: [
+      {
+        title: 'Article',
+        open: true,
+        fields: [
+          { key: 'articleUrl', label: 'Article link', type: 'articleLink', required: true, placeholder: 'https://medium.com/@you/your-post-1a2b3c4d5e6f', hint: 'Medium or Substack. Fetch fills the fields below and copies the cover image into Sanity.' },
+          { key: 'title', label: 'Title', type: 'text', required: true, max: 160 },
+          { key: 'slug.current', label: 'URL slug', type: 'slug', mono: true, required: true, from: 'title', hint: 'The preview page lives at /minds/this-value.' },
+          { key: 'excerpt', label: 'Excerpt', type: 'textarea', rows: 3, max: 400, hint: 'Shown on the card and the preview page.' },
+          { key: 'mainImage', label: 'Cover image', type: 'image', mode: 'asset' },
+        ],
+      },
+      {
+        title: 'Details',
+        open: true,
+        fields: [
+          { key: 'authorName', label: 'Author', type: 'text', max: 80, placeholder: 'Riya S.' },
+          { key: 'siteName', label: 'Published on', type: 'combo', options: MIND_SOURCES },
+          { key: 'publishedAt', label: 'Published', type: 'datetime' },
+          { key: 'tags', label: 'Topics', type: 'chips', options: MIND_TOPICS, hint: 'Shown as tags on the card.' },
+        ],
+      },
+    ],
+  },
 }
 
 export function blankDocument(type) {
   const base = { _type: type, title: '', slug: { _type: 'slug', current: '' }, publicationStatus: 'draft' }
   if (type === 'siteEvent') return { ...base, type: '', status: 'Upcoming', startDate: '', endDate: '', registrationLink: '', ruleBookLink: '', image: '', footerText: '', details: [], problemStatements: [] }
   if (type === 'siteResult') return { ...base, eventId: '', eyebrow: '', subtitle: '', top3: [], honorableMentions: [] }
+  if (type === 'mind') return { ...base, articleUrl: '', excerpt: '', siteName: '', authorName: '', publishedAt: '', tags: [] }
   return { ...base, body: '', startsAt: '', endsAt: '' }
 }
 
