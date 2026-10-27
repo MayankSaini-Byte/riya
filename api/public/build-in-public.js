@@ -1,8 +1,28 @@
 import { randomUUID } from 'node:crypto'
+import { createClient } from '@sanity/client'
 import { getBuildInPublicProjects } from '../../server/build-in-public-projects.js'
 import { checkPublicSubmissionLimit, deleteBuildInPublicAttachment, json, readStoredJson, requireMethod, requireSameOrigin, setSecurityHeaders, writeStoredJson } from '../../server/security.js'
+import { sanityConfig } from '../../server/sanity.js'
 
 const KEY = 'bm-bip:submissions:v1'
+
+// Sanity analyses every uploaded image; reuse its palette and blurred preview
+// so cards can be tinted by their own cover. Covers are stored as CDN URLs.
+async function coverDetails(projects) {
+  const urls = [...new Set(projects.map(project => String(project.imageUrl || '').split('?')[0]).filter(url => url.startsWith('https://cdn.sanity.io/')))]
+  if (!urls.length) return {}
+  const client = createClient({ ...sanityConfig(), apiVersion: '2025-01-01', useCdn: true })
+  const assets = await client.fetch(
+    `*[_type == "sanity.imageAsset" && url in $urls]{
+      url,
+      "lqip": metadata.lqip,
+      "dark": metadata.palette.darkMuted.background,
+      "dominant": metadata.palette.dominant.background
+    }`,
+    { urls },
+  )
+  return Object.fromEntries(assets.map(asset => [asset.url, { lqip: asset.lqip || '', dark: asset.dark || '', dominant: asset.dominant || '' }]))
+}
 function normalizeProfile(value, platform) {
   const input = String(value || '').trim()
   const patterns = {
@@ -39,7 +59,25 @@ export default async function handler(req, res) {
   try {
     if (req.method === 'GET') {
       const projects = await getBuildInPublicProjects()
-      return json(res, 200, { projects: projects.filter(project => project.status === 'published') })
+      // Only a count of accepted contributors per project is public; who they
+      // are stays private. A storage hiccup must not hide the projects.
+      const building = {}
+      try {
+        const submissions = await readStoredJson(KEY, [])
+        for (const item of Array.isArray(submissions) ? submissions : []) {
+          if (item?.status === 'accepted' && item.projectId) building[item.projectId] = (building[item.projectId] || 0) + 1
+        }
+      } catch { /* counts stay at zero */ }
+      const published = projects.filter(project => project.status === 'published')
+      let covers = {}
+      try { covers = await coverDetails(published) } catch { /* cards fall back to a neutral tint */ }
+      return json(res, 200, {
+        projects: published.map(project => ({
+          ...project,
+          contributors: building[project.id] || 0,
+          cover: covers[String(project.imageUrl || '').split('?')[0]] || null,
+        })),
+      })
     }
     if (!requireMethod(req, res, 'POST') || !requireSameOrigin(req, res)) return
     const body = bodyOf(req)

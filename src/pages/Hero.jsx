@@ -42,7 +42,7 @@ const techLogos = [
 import Antigravity from '../components/Antigravity'
 import PageTransition from '../components/PageTransition'
 import { InteractiveGridPattern } from '../components/InteractiveGridPattern'
-import { client, urlFor } from '../lib/sanity'
+import { fetchMinds, urlFor } from '../lib/sanity'
 
 /* ─── Framer Motion variants for Hero entrance ─── */
 const fadeUp = (delay = 0) => ({
@@ -72,8 +72,7 @@ export default function Hero() {
   useEffect(() => {
     async function fetchRecentMinds() {
       try {
-        const query = '*[_type == "mind" && (!defined(publicationStatus) || publicationStatus == "published")] | order(publishedAt desc)[0...8]';
-        let minds = await client.fetch(query);
+        let minds = (await fetchMinds()).slice(0, 8);
         if (minds && minds.length === 2) {
           minds = [...minds, ...minds];
         } else if (minds && minds.length === 1) {

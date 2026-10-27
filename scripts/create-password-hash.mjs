@@ -1,5 +1,5 @@
 import { createInterface } from 'node:readline'
-import { createPasswordHash } from '../api/_lib/security.js'
+import { createPasswordHash } from '../server/security.js'
 
 const input = process.stdin
 if (!input.isTTY || typeof input.setRawMode !== 'function') {

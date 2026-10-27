@@ -28,7 +28,7 @@ function App() {
   const hideNavAndFooter = location.pathname.startsWith('/minds/') || isAdmin
   
   return (
-    <SmoothScroll>
+    <SmoothScroll disabled={isAdmin}>
       {!isAdmin && <TargetCursor />}
       {!hideNavAndFooter && <Navbar />}
       {!isAdmin && <PublicAnnouncements />}
